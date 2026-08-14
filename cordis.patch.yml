@@ -1,0 +1,6 @@
+# Minimal bundle patch for the dsh-delete-session out-of-tree plugin.
+# Applied over the profile root as ONE insert; the profile's own
+# cordis.patch.yml and any --patch overlays can still override this row by id.
+- insert:
+    - id: delete-session
+      name: dsh-delete-session

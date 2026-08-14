@@ -1,0 +1,89 @@
+# dsh-delete-session
+
+一个极简的 DeepSeek Harness **Web** 树外插件：在左侧会话列表中「会话行 `…` 菜单」的「归档会话」下方追加一项「删除会话」，经二次确认后永久删除该会话的磁盘目录（含对话日志）。
+
+它不修改 DSH 核心安装，也不修改任何 profile 配置。host 端持有一条 HTTP 路由；浏览器端通过 DOM 注入在核心菜单中追加删除项。
+
+## 功能
+
+- host 端（`index.js`）注册 `POST /delete-session/delete`。
+- 浏览器端（`client.js`）监听会话行 `…` 菜单的弹出，在「归档会话」下方注入「删除会话」项（zh/en 双语）。
+- 点击后弹出二次确认，确认后调用删除路由；成功后刷新会话与工作区列表。
+- **执行中的会话拒绝删除**（HTTP 409）：当前会话、正在运行任务的会话都不能被删除，避免破坏正在写入的日志。
+
+## 会话定位算法（按设计实现）
+
+由于核心 UI 的会话行菜单是硬编码数组、没有扩展 slot，且 UI 原语模块是 shell 冻结的 seed 模块，本插件改在 **DOM 层**注入。为把「当前这个菜单」关联到唯一的会话，使用**双条件文本匹配**：
+
+1. **displayTitle**：读取该行实际渲染的标题文本，与 `sessions.list` 中每个会话的 `displayTitle` 精确比较。
+2. **相对时间**：读取该行实际渲染的相对时间文本（如「5分钟」「5min」），并用与核心 `dsh-client-ui-workspace` **完全相同的分桶算法**（60s / 1h / 1d / 30d / 365d）对每个候选会话的 `updatedAt` 计算标签后精确比较。
+3. **唯一命中规则**：同时满足两个条件的候选会话数量**恰好为 1** 时才注入菜单项；0 个或 ≥2 个都不注入。
+
+匹配与显示均支持 zh / en 两种语言（依据菜单中「归档会话 / Archive session」的实际文案自动判定）；其他语言下不注入。
+
+## 安装
+
+本插件与 `dsh-archive-manager` 同构：放在磁盘上，再装进现有 `web` profile。
+
+```bash
+dsh plugin --profile web add "C:\Users\yashi\.dsh\plugins\dsh-delete-session"
+```
+
+然后手工把插件加进 `$DSH_HOME/profiles/web/package.json` 的 bundle 列表：
+
+```jsonc
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "dsh-delete-session": "link:C:/Users/yashi/.dsh/plugins/dsh-delete-session"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-delete-session"
+      ]
+    }
+  }
+}
+```
+
+`dependencies` 条目由 `dsh plugin --profile web add` 写入；较新版本的 dsh 会同时自动追加 `dsh.profile.bundles`，若未自动追加则手工补上。
+
+插件的 `cordis.patch.yml`（经 `dsh.bundle.patch` 声明）注入 host 行：
+
+```yaml
+- insert:
+    - id: delete-session
+      name: dsh-delete-session
+```
+
+## 重启
+
+运行中的进程不会加载新的 bundle 行，需要重启 web profile：
+
+```bash
+dsh web
+```
+
+刷新页面后，打开任意会话行 `…` 菜单，符合条件的行会在「归档会话」下方出现「删除会话」。
+
+## 安全与限制
+
+- **执行中会话拒绝**：`ctx.sessions.get(id)` 非空即返回 409，删除前还会二次检查。
+- **原始工件后端必需**：持久化后端必须提供 `supportsRawArtifacts === true` 与返回 `{ kind: 'jsonl', path }` 的 `locate()`，否则返回 501。
+- **只删会话目录**：`rm(dirname(location.path), { recursive: true, force: false })`，不修改工作区注册表、归档标记、投影缓存与共享附件。
+- **不可恢复**：删除是递归 `rm`，没有回收站。
+- **同名保守策略**：标题相同且相对时间相同的行，匹配数量 ≥2，二者都不会出现删除项。
+- **DOM 注入的固有脆弱性**：本插件依赖核心 UI 的 DOM 结构（`button → span.root → span.rowActions → 时间 span → 标题 span`）与「归档会话」菜单项文案。DSH 升级后若结构或文案变化，注入会静默失效（不会报错、也不会误删），需按新结构修正 `client.js`。
+- **相对时间边界漂移**：行上的相对时间由核心在渲染时计算，匹配时用当前时刻重算；若恰好处在分桶边界，可能出现 0 命中而不注入（保守、安全）。
+
+## 卸载
+
+从 profile 的 `dsh.profile.bundles`（以及 `dependencies`）中移除 `dsh-delete-session` 后重启。插件自身不产生持久状态，无需其他清理。
+
+## License
+
+MIT — 见 [LICENSE](LICENSE)。
