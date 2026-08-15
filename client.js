@@ -21,15 +21,24 @@ window.__ModuleLoader__.load({
     //   3. 依 DOM 結構（button → span(root) → span(rowActions) →
     //      前一兄弟為時間 span → 再前一兄弟為標題 span）讀取該行實際
     //      渲染出來的標題與相對時間文字。
-    //   4. 以 displayTitle + 相對時間（與核心相同的分桶演算法）做雙
+    //   4. 注入前先確認前端資料已載入完成：sessions 清單 phase 為
+    //      "ready"，workspaces 清單 phase 為 "ready" 且 baselinesReady
+    //      為 true；資料未就緒時不干涉（資料到達會觸發側邊欄重繪，
+    //      選單仍開啟時 MutationObserver 會再次進入並補注入）。
+    //   5. 注入前的額外延時由 INJECT_DELAY_MS 控制：為 0 時「完全關閉
+    //      延時」直接同步注入（不建立計時器）；設為正數才啟用延時。
+    //   6. 以 displayTitle + 相對時間（與核心相同的分桶演算法）做雙
     //      條件匹配；命中數量「恰為 1」才注入，否則不注入。
-    //   5. 點擊「刪除會話」→ 關閉選單 → 二次確認彈窗 → POST 給 host
+    //   7. 點擊「刪除會話」→ 關閉選單 → 二次確認彈窗 → POST 給 host
     //      端的刪除路由；成功後刷新 sessions 與 workspaces 清單。
     // =====================================================================
 
     const DELETE_ITEM_ATTR = "data-dsh-delete-session-item";
     const ROUTE = "/delete-session/delete";
     const ANCHOR_FRESH_MS = 2000;
+    // 注入前的額外延時（毫秒）。設為 0 時「完全關閉延時」，直接同步注入，
+    // 不使用 setTimeout（亦即不讓計時器計 0 秒）；設為正數才啟用延時。
+    const INJECT_DELAY_MS = 0;
 
     // ---------- 多語文案 ----------
     const STRINGS = {
@@ -377,49 +386,107 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 選單偵測與注入 ----------
-    function maybeInject(menuEl) {
-      if (!activeCtx) return;
-      if (!isElement(menuEl)) return;
-      if (menuEl.querySelector("[" + DELETE_ITEM_ATTR + "]") !== null) return;
+    // ---------- 前端資料就緒判斷 ----------
+    // sessions 清單 phase 為 "ready" 代表基準清單已從 host 拉取完成；
+    // workspaces 的 baselinesReady 同時要求兩者皆 ready（見核心 WorkspaceRuntime.project）。
+    function frontendDataReady() {
+      try {
+        const sessions = activeCtx.sessions.list.getSnapshot();
+        if (sessions.phase !== "ready") return false;
+        const workspaces = activeCtx.workspaces.list.getSnapshot();
+        if (workspaces.phase !== "ready" || workspaces.baselinesReady !== true) return false;
+        return true;
+      } catch {
+        return false;
+      }
+    }
 
-      // 1) 以「歸檔會話」項目判定語系與選單類型。
-      let locale = null;
-      let archiveButton = null;
+    // 以「歸檔會話」項目判定是否為會話行選單並回傳語系；否則回傳 null。
+    function detectSessionMenuLocale(menuEl) {
       for (const button of menuEl.querySelectorAll('[role="menuitem"]')) {
         const text = (button.textContent || "").trim();
-        if (text === STRINGS.zh.menuArchiveSession) {
-          locale = "zh";
-          archiveButton = button;
-          break;
-        }
-        if (text === STRINGS.en.menuArchiveSession) {
-          locale = "en";
-          archiveButton = button;
-          break;
-        }
+        if (text === STRINGS.zh.menuArchiveSession) return "zh";
+        if (text === STRINGS.en.menuArchiveSession) return "en";
       }
-      if (locale === null || !archiveButton) return; // 非會話行選單。
+      return null;
+    }
 
-      // 2) 定位該行。
+    // 完整解析注入目標：語系 + 歸檔項 + 該行 + 雙條件唯一匹配。
+    // 回傳 null 代表此刻不應注入（非會話選單、行定位失敗或命中數量不為 1）。
+    function resolveInjectionTarget(menuEl) {
+      const locale = detectSessionMenuLocale(menuEl);
+      if (locale === null) return null;
+
+      // 1) 定位該行。
       const anchor = resolveAnchorButton(menuEl);
-      if (!anchor) return;
+      if (!anchor) return null;
       const texts = readRowTexts(anchor);
-      if (!texts) return;
+      if (!texts) return null;
 
-      // 3) 雙條件唯一匹配（displayTitle + 相對時間）。
+      // 2) 取歸檔集合（取不到時不排除，保守規則仍要求唯一命中）。
       let archivedIds = null;
       try {
         const workspaces = activeCtx.workspaces.list.getSnapshot();
         if (Array.isArray(workspaces.archivedSessionIds)) archivedIds = workspaces.archivedSessionIds;
       } catch {
-        // 取不到歸檔集合時不排除（保守規則仍要求唯一命中）。
+        // 忽略：見上。
       }
+
+      // 3) 雙條件唯一匹配（displayTitle + 相對時間）。
       const list = activeCtx.sessions.list.getSnapshot();
       const session = findUniqueSession(list, texts.title, texts.time, locale, archivedIds);
-      if (!session) return; // 命中數量不為 1 → 不注入。
+      if (!session) return null;
 
-      // 4) 注入。
-      injectItem(menuEl, archiveButton, locale, session, anchor);
+      // 4) 以觸發時的最新 DOM 重新定位「歸檔會話」項目。
+      let archiveButton = null;
+      for (const button of menuEl.querySelectorAll('[role="menuitem"]')) {
+        const text = (button.textContent || "").trim();
+        if (text === STRINGS[locale].menuArchiveSession) {
+          archiveButton = button;
+          break;
+        }
+      }
+      if (!archiveButton) return null;
+
+      return { locale, archiveButton, anchor, session };
+    }
+
+    // 執行注入：於排程觸發時（或延時關閉時的同步路徑）重新完整解析，
+    // 確保資料仍就緒、選單仍在 DOM、唯一命中仍成立，然後才介入 DOM。
+    const pendingInjections = new Map(); // 選單元素 → setTimeout id（僅延時開啟時使用）
+
+    function performInjection(menuEl) {
+      if (!menuEl.isConnected) return;
+      if (menuEl.querySelector("[" + DELETE_ITEM_ATTR + "]") !== null) return;
+      if (!frontendDataReady()) return;
+      const target = resolveInjectionTarget(menuEl);
+      if (!target) return;
+      injectItem(menuEl, target.archiveButton, target.locale, target.session, target.anchor);
+    }
+
+    function scheduleInjection(menuEl) {
+      if (pendingInjections.has(menuEl)) return;
+      // 延時關閉（INJECT_DELAY_MS 為 0）：不建立計時器，直接同步注入。
+      if (INJECT_DELAY_MS <= 0) {
+        performInjection(menuEl);
+        return;
+      }
+      const timer = setTimeout(() => {
+        pendingInjections.delete(menuEl);
+        performInjection(menuEl);
+      }, INJECT_DELAY_MS);
+      pendingInjections.set(menuEl, timer);
+    }
+
+    function maybeInject(menuEl) {
+      if (!activeCtx) return;
+      if (!isElement(menuEl)) return;
+      if (menuEl.querySelector("[" + DELETE_ITEM_ATTR + "]") !== null) return;
+      // 資料尚未載入完成前不干涉前端；資料到達會觸發側邊欄重繪，
+      // MutationObserver 會再次進入本函式，選單仍開啟時即可補注入。
+      if (!frontendDataReady()) return;
+      if (detectSessionMenuLocale(menuEl) === null) return; // 非會話行選單。
+      scheduleInjection(menuEl);
     }
 
     // 掃描目前所有開啟的選單（供重注入使用）。
@@ -522,6 +589,8 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => {
         document.removeEventListener("click", onClickCapture, true);
         observer.disconnect();
+        for (const timer of pendingInjections.values()) clearTimeout(timer);
+        pendingInjections.clear();
         closeModal();
         unmountStyle();
         lastAnchorButton = null;
