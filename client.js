@@ -29,8 +29,12 @@ window.__ModuleLoader__.load({
     //      延時」直接同步注入（不建立計時器）；設為正數才啟用延時。
     //   6. 以 displayTitle + 相對時間（與核心相同的分桶演算法）做雙
     //      條件匹配；命中數量「恰為 1」才注入，否則不注入。
-    //   7. 點擊「刪除會話」→ 關閉選單 → 二次確認彈窗 → POST 給 host
-    //      端的刪除路由；成功後刷新 sessions 與 workspaces 清單。
+    //   7. 點擊「刪除會話」：第一次點擊就地切換為警示狀態（紅底、警告
+    //      圖標與「再次點擊刪除」文案），不關閉選單也不彈窗；第二次點擊
+    //      才真正呼叫 host 端刪除路由。警示狀態按會話 id 記憶
+    //      （ARM_HOLD_MS 視窗），期間選單關閉重開仍會以警示狀態注入。
+    //      刪除失敗時以純 DOM 錯誤彈窗提示；成功後刷新 sessions 與
+    //      workspaces 清單。
     // =====================================================================
 
     const DELETE_ITEM_ATTR = "data-dsh-delete-session-item";
@@ -45,11 +49,9 @@ window.__ModuleLoader__.load({
       zh: {
         menuArchiveSession: "归档会话",
         menuDeleteSession: "删除会话",
-        modalTitle: "删除会话",
-        modalDescription: (title) => "确定要删除会话「" + title + "」吗？其会话记录（含对话日志）将被永久删除，且无法恢复。共享附件不会被删除。",
-        cancel: "取消",
-        confirm: "删除",
-        deleting: "正在删除…",
+        menuDeleteConfirm: "再次点击删除",
+        errorTitle: "删除失败",
+        ok: "确定",
         liveSession: "无法删除正在使用中的会话（例如当前会话或正在运行任务的会话）",
         notFound: "会话不存在或已被删除",
         genericError: "删除失败，请稍后重试",
@@ -58,11 +60,9 @@ window.__ModuleLoader__.load({
       en: {
         menuArchiveSession: "Archive session",
         menuDeleteSession: "Delete session",
-        modalTitle: "Delete session",
-        modalDescription: (title) => 'Delete session "' + title + '"? Its session record (including the conversation log) will be permanently deleted and cannot be restored. Shared attachments are not deleted.',
-        cancel: "Cancel",
-        confirm: "Delete",
-        deleting: "Deleting…",
+        menuDeleteConfirm: "Click again to delete",
+        errorTitle: "Delete failed",
+        ok: "OK",
         liveSession: "Cannot delete a session that is currently in use (for example the current session or one that is running tasks)",
         notFound: "The session does not exist or has already been deleted",
         genericError: "Deletion failed, please try again later",
@@ -180,6 +180,46 @@ window.__ModuleLoader__.load({
 
     // ---------- 選單項目注入 ----------
     const TRASH_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h11M6.5 4V2.75a.75.75 0 0 1 .75-.75h1.5a.75.75 0 0 1 .75.75V4m-6.5 0 .6 8.2a1.25 1.25 0 0 0 1.25 1.16h4.8a1.25 1.25 0 0 0 1.25-1.16l.6-8.2M6.5 7v3.5M9.5 7v3.5"/></svg>';
+    // 警示圖標：與核心原語 IconWarningOutline16 相同的路徑（警示三角 + 驚嘆號）。
+    const WARNING_SVG = '<svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6.3002 3.32843L7.69986 3.32843L7.69986 7.79657H6.3002L6.3002 3.32843Z" fill="currentColor"/><path d="M6.3002 9.01935H7.69986V10.6711H6.3002V9.01935Z" fill="currentColor"/><path d="M12.6328 6.99976C12.6328 3.88874 10.111 1.36694 7 1.36694C3.88899 1.36695 1.3672 3.88875 1.36719 6.99976C1.36719 10.1108 3.88899 12.6326 7 12.6326C10.111 12.6326 12.6328 10.1108 12.6328 6.99976ZM13.8582 6.99976C13.8582 10.7873 10.7876 13.8579 7 13.8579C3.21244 13.8579 0.141846 10.7873 0.141846 6.99976C0.141857 3.2122 3.21245 0.141612 7 0.141602C10.7876 0.141602 13.8581 3.21219 13.8582 6.99976Z" fill="currentColor"/></svg>';
+
+    // ---------- 兩段式確認狀態 ----------
+    // 以 sessionId 記憶「已點擊一次」的警示狀態；ARM_HOLD_MS 視窗內選單
+    // 關閉重開仍會以警示樣式注入，第二次點擊即直接刪除。狀態僅存於記憶體。
+    const ARM_HOLD_MS = 8000;
+    const armedSessions = new Map(); // sessionId → 解除警示的計時器 id
+
+    function disarmSession(sessionId) {
+      const timer = armedSessions.get(sessionId);
+      if (timer !== undefined) clearTimeout(timer);
+      armedSessions.delete(sessionId);
+    }
+
+    function armSession(sessionId) {
+      disarmSession(sessionId); // 重複點擊時重置倒數。
+      const timer = setTimeout(() => {
+        armedSessions.delete(sessionId);
+      }, ARM_HOLD_MS);
+      armedSessions.set(sessionId, timer);
+    }
+
+    function isSessionArmed(sessionId) {
+      return armedSessions.has(sessionId);
+    }
+
+    function disarmAllSessions() {
+      for (const timer of armedSessions.values()) clearTimeout(timer);
+      armedSessions.clear();
+    }
+
+    // 將選單項切換為警示外觀：紅底、白字、警告圖標與「再次點擊刪除」文案。
+    function renderArmed(button, locale) {
+      button.setAttribute("data-dsh-delete-session-armed", "1");
+      const iconSpan = button.firstElementChild;
+      if (iconSpan) iconSpan.innerHTML = WARNING_SVG;
+      const labelSpan = button.lastElementChild;
+      if (labelSpan) labelSpan.textContent = STRINGS[locale].menuDeleteConfirm;
+    }
 
     function injectItem(menuEl, archiveButton, locale, session, anchor) {
       if (menuEl.querySelector("[" + DELETE_ITEM_ATTR + "]") !== null) return;
@@ -196,20 +236,31 @@ window.__ModuleLoader__.load({
       if (iconSpan) iconSpan.innerHTML = TRASH_SVG;
       const labelSpan = button.lastElementChild;
       if (labelSpan) labelSpan.textContent = STRINGS[locale].menuDeleteSession;
+      // 記憶中的警示狀態（例如選單曾關閉又重開）：直接以警示樣式注入。
+      if (isSessionArmed(session.id)) renderArmed(button, locale);
+      // 防止同一個項目在刪除請求進行中重複觸發。
+      let busy = false;
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        requestDeleteFlow(session, locale, anchor);
+        if (!isSessionArmed(session.id)) {
+          // 第一次點擊：就地進入警示狀態，不關閉選單、不彈窗。
+          armSession(session.id);
+          renderArmed(button, locale);
+          return;
+        }
+        // 第二次點擊：直接刪除（無確認彈窗）。
+        if (busy) return;
+        busy = true;
+        closeOpenMenu(anchor);
+        deleteSession(session, locale);
       });
       // 插到「歸檔會話」項目的正下方。
       wrap.insertAdjacentElement("afterend", clone);
     }
 
     // ---------- 刪除流程 ----------
-    function requestDeleteFlow(session, locale, anchor) {
-      closeOpenMenu(anchor);
-      showConfirmModal(session, locale);
-    }
+    // 第二次點擊後直接呼叫刪除路由；成功路徑沒有任何彈窗。
 
     // 關閉選單：優先點擊錨點按鈕觸發 React 的 toggle；失敗則派發
     // pointerdown 讓 Menu 的 outside-close 邏輯接管。
@@ -229,10 +280,10 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // ---------- 二次確認彈窗（純 DOM，不使用 React） ----------
+    // ---------- 錯誤彈窗（純 DOM，不使用 React） ----------
+    // 僅在刪除失敗時顯示，用來提示失敗原因；不含確認按鈕。
     let modalRoot = null;
     let modalState = null;
-    let modalToken = 0;
 
     function ensureModalRoot() {
       if (!modalRoot || !modalRoot.isConnected) {
@@ -252,9 +303,8 @@ window.__ModuleLoader__.load({
       modalRoot = null;
     }
 
-    function showConfirmModal(session, locale) {
+    function showErrorModal(message, locale) {
       closeModal();
-      const token = ++modalToken;
       const strings = STRINGS[locale];
       const root = ensureModalRoot();
 
@@ -268,41 +318,28 @@ window.__ModuleLoader__.load({
 
       const titleEl = document.createElement("div");
       titleEl.className = "dshds-title";
-      titleEl.textContent = strings.modalTitle;
+      titleEl.textContent = strings.errorTitle;
 
       const descEl = document.createElement("p");
       descEl.className = "dshds-desc";
-      descEl.textContent = strings.modalDescription(session.displayTitle);
-
-      const errorEl = document.createElement("p");
-      errorEl.className = "dshds-error";
-      errorEl.setAttribute("role", "alert");
+      descEl.textContent = message;
 
       const actions = document.createElement("div");
       actions.className = "dshds-actions";
 
-      const cancelButton = document.createElement("button");
-      cancelButton.type = "button";
-      cancelButton.className = "dshds-btn dshds-btn-cancel";
-      cancelButton.textContent = strings.cancel;
+      const okButton = document.createElement("button");
+      okButton.type = "button";
+      okButton.className = "dshds-btn dshds-btn-ok";
+      okButton.textContent = strings.ok;
 
-      const confirmButton = document.createElement("button");
-      confirmButton.type = "button";
-      confirmButton.className = "dshds-btn dshds-btn-danger";
-      confirmButton.textContent = strings.confirm;
-
-      actions.appendChild(cancelButton);
-      actions.appendChild(confirmButton);
+      actions.appendChild(okButton);
       card.appendChild(titleEl);
       card.appendChild(descEl);
-      card.appendChild(errorEl);
       card.appendChild(actions);
       overlay.appendChild(card);
       root.appendChild(overlay);
 
-      let settled = false;
       const dispose = () => {
-        settled = true;
         document.removeEventListener("keydown", onKeyDown, true);
         overlay.removeEventListener("click", onOverlayClick);
       };
@@ -316,34 +353,17 @@ window.__ModuleLoader__.load({
         if (event.target === overlay) closeModal();
       };
 
-      const setPending = (pending) => {
-        cancelButton.disabled = pending;
-        confirmButton.disabled = pending;
-        confirmButton.textContent = pending ? strings.deleting : strings.confirm;
-        errorEl.style.display = "none";
-      };
-      const setError = (message) => {
-        errorEl.textContent = message;
-        errorEl.style.display = "block";
-      };
-
-      cancelButton.addEventListener("click", () => closeModal());
-      confirmButton.addEventListener("click", () => {
-        if (settled) return;
-        setPending(true);
-        deleteSession(session, locale, setPending, setError, token);
-      });
+      okButton.addEventListener("click", () => closeModal());
       document.addEventListener("keydown", onKeyDown, true);
       overlay.addEventListener("click", onOverlayClick);
 
       modalState = { dispose };
-      // 開啟後將焦點交給「取消」，方便鍵盤操作。
-      cancelButton.focus();
+      // 開啟後將焦點交給「確定」，方便鍵盤操作。
+      okButton.focus();
     }
 
-    async function deleteSession(session, locale, setPending, setError, token) {
+    async function deleteSession(session, locale) {
       const strings = STRINGS[locale];
-      const current = () => token === modalToken;
       let response;
       try {
         response = await fetch(ROUTE, {
@@ -352,10 +372,8 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ sessionId: session.id })
         });
       } catch {
-        if (current()) {
-          setPending(false);
-          setError(strings.networkError);
-        }
+        disarmSession(session.id);
+        showErrorModal(strings.networkError, locale);
         return;
       }
       let payload = null;
@@ -365,16 +383,15 @@ window.__ModuleLoader__.load({
         payload = null;
       }
       if (!response.ok) {
-        if (!current()) return;
-        setPending(false);
+        // 失敗即解除警示：兩段式確認週期已消耗，避免下次單擊誤刪。
+        disarmSession(session.id);
         const code = payload !== null && typeof payload.code === "string" ? payload.code : null;
-        if (code === "LIVE_SESSION") setError(strings.liveSession);
-        else if (code === "NOT_FOUND") setError(strings.notFound);
-        else setError(strings.genericError);
+        if (code === "LIVE_SESSION") showErrorModal(strings.liveSession, locale);
+        else if (code === "NOT_FOUND") showErrorModal(strings.notFound, locale);
+        else showErrorModal(strings.genericError, locale);
         return;
       }
-      // 只有仍是最新彈窗時才關閉；過期請求只做刷新。
-      if (current()) closeModal();
+      disarmSession(session.id);
       // 刪除已成功；刷新為盡力而為（與 dsh-archive-manager 相同）。
       if (activeCtx) {
         try {
@@ -500,21 +517,19 @@ window.__ModuleLoader__.load({
     const CSS_TAG_ID = "dsh-delete-session/delete-session.css";
     const STYLE_SELECTOR = "style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID) + "]";
     const css = [
-      "[data-dsh-delete-session-item]{color:var(--dsw-alias-state-error-primary);}",
+      "[data-dsh-delete-session-item]{color:var(--dsw-alias-label-primary);}",
       "[data-dsh-delete-session-item]:hover{background:var(--dsw-alias-interactive-bg-hover);}",
+      "[data-dsh-delete-session-item][data-dsh-delete-session-armed]{background:var(--dsw-alias-state-error-primary);color:#fff;}",
+      "[data-dsh-delete-session-item][data-dsh-delete-session-armed]:hover{background:var(--dsw-alias-state-error-primary);filter:brightness(1.08);}",
       ".dshds-modal-root{position:relative;z-index:1000;}",
       ".dshds-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;}",
       ".dshds-card{box-sizing:border-box;width:min(420px,calc(100vw - 48px));background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:var(--dsw-shadow-lv2);padding:20px;color:var(--dsw-alias-label-primary);}",
       ".dshds-title{margin:0 0 8px;font-size:16px;font-weight:600;line-height:24px;}",
       ".dshds-desc{margin:0 0 16px;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px;word-break:break-word;}",
-      ".dshds-error{display:none;margin:0 0 12px;color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px;}",
       ".dshds-actions{display:flex;justify-content:flex-end;gap:8px;}",
       ".dshds-btn{box-sizing:border-box;height:32px;padding:0 14px;border-radius:8px;font-family:inherit;font-size:13px;line-height:18px;cursor:pointer;}",
-      ".dshds-btn:disabled{opacity:.6;cursor:default;}",
-      ".dshds-btn-cancel{background:transparent;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);}",
-      ".dshds-btn-cancel:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}",
-      ".dshds-btn-danger{background:var(--dsw-alias-state-error-primary);border:1px solid var(--dsw-alias-state-error-primary);color:#fff;}",
-      ".dshds-btn-danger:hover:not(:disabled){background:var(--dsw-alias-state-error-primary);filter:brightness(1.05);}"
+      ".dshds-btn-ok{background:transparent;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);}",
+      ".dshds-btn-ok:hover{background:var(--dsw-alias-interactive-bg-hover);}"
     ].join("\n");
 
     function mountStyle() {
@@ -591,6 +606,7 @@ window.__ModuleLoader__.load({
         observer.disconnect();
         for (const timer of pendingInjections.values()) clearTimeout(timer);
         pendingInjections.clear();
+        disarmAllSessions();
         closeModal();
         unmountStyle();
         lastAnchorButton = null;

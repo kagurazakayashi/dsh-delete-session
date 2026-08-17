@@ -1,6 +1,6 @@
 {
   "name": "dsh-delete-session",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A minimal DeepSeek Harness Web plugin that appends a delete-session item below the archive-session item in the sidebar session row menu, resolved by an exact displayTitle + relative-time match.",
   "private": true,
   "license": "MIT",
