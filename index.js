@@ -1,16 +1,20 @@
 // dsh-delete-session（host 端）
 //
 // 提供 POST /delete-session/delete：永久刪除一個「非執行中」會話的
-// 磁碟目錄（含其 JSONL 日誌與目錄內檔案）。執行中（live）的會話一律
-// 拒絕，避免刪除正在寫入的日誌；其餘安全邊界（原始工件定位、刪除前
-// 二次 live 檢查）與 dsh-archive-manager 保持一致。
+// 磁碟目錄（含其 JSONL 日誌與目錄內檔案）。只有「正在執行任務」的
+// 會話（agent 狀態非 idle）會被拒絕，避免刪除正在寫入的日誌；僅被打開
+// 過、之後切換走而仍駐留記憶體的空閒（idle）會話可以刪除。
+//
+// 破壞性刪除前會先呼叫 workspaceRegistry.archiveSession，讓側欄經由
+// host/archived-sessions-changed 廣播即時隱藏該會話（同時優雅處理
+// 「當前會話」：客戶端會自動清空選擇），避免刪除後仍殘留於清單。
 
 import { rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
 // 穩定的 Cordis 外掛名稱與所需的 host 服務。
 export const name = "delete-session";
-export const inject = ["sessions", "sessionPersistence", "webServer"];
+export const inject = ["sessions", "sessionPersistence", "workspaceRegistry", "agents", "webServer"];
 
 const ROUTE = "/delete-session/delete";
 const MAX_BODY_BYTES = 16 * 1024;
@@ -24,6 +28,12 @@ function sendJson(res, status, body, extraHeaders = {}) {
     ...extraHeaders
   });
   res.end(json);
+}
+
+/** 判斷會話是否正在執行任務（agent 狀態非 idle 即視為執行中）。 */
+function isSessionRunning(ctx, sessionId) {
+  const agent = ctx.agents?.get(sessionId);
+  return agent !== undefined && agent.status !== "idle";
 }
 
 /** 以 UTF-8 讀取請求本文，超過 `cap` 位元組即拒絕。 */
@@ -69,9 +79,11 @@ async function handleDelete(ctx, req, res) {
     return sendJson(res, 400, { ok: false, code: "BAD_SESSION_ID", error: "sessionId must be a non-empty string" });
   }
 
-  // 執行中會話守衛：在持久化查詢之前先做一次。
-  if (ctx.sessions.get(sessionId) !== undefined) {
-    return sendJson(res, 409, { ok: false, code: "LIVE_SESSION", error: "cannot delete a live session" });
+  // 執行中會話守衛：只拒絕「正在執行任務」的會話（在持久化查詢前先做一次）。
+  // 先前「ctx.sessions.get(id) !== undefined」會把所有曾被 resume（打開）過、
+  // 之後切換走仍駐留記憶體的空閒會話一併拒絕，導致切換會話後無法刪除。
+  if (isSessionRunning(ctx, sessionId)) {
+    return sendJson(res, 409, { ok: false, code: "LIVE_SESSION", error: "cannot delete a running session" });
   }
 
   let meta;
@@ -99,9 +111,20 @@ async function handleDelete(ctx, req, res) {
     return sendJson(res, 501, { ok: false, code: "NO_JSONL_LOCATION", error: "session persistence backend has no jsonl artifact location" });
   }
 
-  // 破壞性刪除前的最後一次執行中檢查。
-  if (ctx.sessions.get(sessionId) !== undefined) {
-    return sendJson(res, 409, { ok: false, code: "LIVE_SESSION", error: "cannot delete a live session" });
+  // 破壞性刪除前的最後一次執行中檢查（與上方守衛之間的短暫窗口內，
+  // 會話若開始執行任務則拒絕）。
+  if (isSessionRunning(ctx, sessionId)) {
+    return sendJson(res, 409, { ok: false, code: "LIVE_SESSION", error: "cannot delete a running session" });
+  }
+
+  // 先歸檔：讓側欄經由 host/archived-sessions-changed 廣播即時隱藏該會話，
+  // 避免 rm 後仍殘留於清單（也會讓「當前會話」被客戶端自動清空選擇）。
+  // 歸檔是冪等操作；此處視為盡力而為——失敗不阻斷刪除主流程。
+  try {
+    await ctx.workspaceRegistry.archiveSession(sessionId);
+  } catch {
+    // 歸檔失敗僅代表側欄可能延遲隱藏（至下次重新整理或重啟後消失），
+    // 磁碟刪除仍繼續。
   }
 
   try {

@@ -52,7 +52,7 @@ window.__ModuleLoader__.load({
         menuDeleteConfirm: "再次点击删除",
         errorTitle: "删除失败",
         ok: "确定",
-        liveSession: "无法删除正在使用中的会话（例如当前会话或正在运行任务的会话）",
+        liveSession: "无法删除正在运行任务的会话，请等待任务结束后重试",
         notFound: "会话不存在或已被删除",
         genericError: "删除失败，请稍后重试",
         networkError: "网络请求失败，请稍后重试"
@@ -63,7 +63,7 @@ window.__ModuleLoader__.load({
         menuDeleteConfirm: "Click again to delete",
         errorTitle: "Delete failed",
         ok: "OK",
-        liveSession: "Cannot delete a session that is currently in use (for example the current session or one that is running tasks)",
+        liveSession: "Cannot delete a session that is running a task; please wait for it to finish",
         notFound: "The session does not exist or has already been deleted",
         genericError: "Deletion failed, please try again later",
         networkError: "Network request failed, please try again later"
