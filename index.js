@@ -19,7 +19,17 @@ export const inject = ["sessions", "sessionPersistence", "workspaceRegistry", "a
 const ROUTE = "/delete-session/delete";
 const MAX_BODY_BYTES = 16 * 1024;
 
-/** 回傳一份 JSON 回應；回應本文從不序列化絕對路徑。 */
+/**
+ * 回傳一份 JSON 回應，並設定內容型別與內容長度標頭。
+ *
+ * 回應本文僅序列化 `body` 物件，不會洩漏任何絕對路徑。
+ *
+ * @param {object} res Node.js 的 HTTP 回應物件（ServerResponse）。
+ * @param {number} status 欲回傳的 HTTP 狀態碼。
+ * @param {object} body 欲序列化為 JSON 的回應內容。
+ * @param {object} [extraHeaders] 額外的回應標頭（例如 allow）。
+ * @returns {void}
+ */
 function sendJson(res, status, body, extraHeaders = {}) {
   const json = JSON.stringify(body);
   res.writeHead(status, {
@@ -30,13 +40,31 @@ function sendJson(res, status, body, extraHeaders = {}) {
   res.end(json);
 }
 
-/** 判斷會話是否正在執行任務（agent 狀態非 idle 即視為執行中）。 */
+/**
+ * 判斷指定會話是否正在執行任務。
+ *
+ * 以對應 agent 的狀態為準：agent 不存在（未載入）或狀態為 idle 皆視為
+ * 非執行中；只有狀態非 idle（例如 busy、thinking 等）才視為執行中。
+ *
+ * @param {object} ctx 外掛執行期上下文（提供 agents 服務）。
+ * @param {string} sessionId 會話唯一識別碼。
+ * @returns {boolean} 會話正在執行任務時回傳 true，否則回傳 false。
+ */
 function isSessionRunning(ctx, sessionId) {
   const agent = ctx.agents?.get(sessionId);
   return agent !== undefined && agent.status !== "idle";
 }
 
-/** 以 UTF-8 讀取請求本文，超過 `cap` 位元組即拒絕。 */
+/**
+ * 以 UTF-8 編碼讀取 HTTP 請求本文。
+ *
+ * 讀取過程中若累計位元組數超過 `cap` 上限，即拋出帶有
+ * `code === "BODY_TOO_LARGE"` 的錯誤，避免超大請求拖垮主機。
+ *
+ * @param {object} req Node.js 的 HTTP 請求物件（可疊代的讀取串流）。
+ * @param {number} cap 允許的最大請求本文位元組數。
+ * @returns {Promise<string>} 解析完成的 UTF-8 字串。
+ */
 async function readBody(req, cap) {
   const chunks = [];
   let received = 0;
@@ -52,6 +80,20 @@ async function readBody(req, cap) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/**
+ * 處理 POST /delete-session/delete 的刪除請求。
+ *
+ * 完整流程：校驗方法與請求本文 → 解析 JSON → 校驗 sessionId →
+ * 執行中會話守衛（前後各一次）→ 查詢持久化中繼資料 → 定位原始 JSONL
+ * 工件目錄 → 歸檔（盡力而為）→ 遞迴刪除磁碟目錄。每一步失敗都會回傳
+ * 對應的錯誤碼與 HTTP 狀態碼。
+ *
+ * @param {object} ctx 外掛執行期上下文（提供 sessions、agents、
+ *   sessionPersistence、workspaceRegistry 等服務）。
+ * @param {object} req Node.js 的 HTTP 請求物件。
+ * @param {object} res Node.js 的 HTTP 回應物件。
+ * @returns {Promise<void>}
+ */
 async function handleDelete(ctx, req, res) {
   if (req.method !== "POST") {
     return sendJson(res, 405, { ok: false, code: "METHOD_NOT_ALLOWED", error: "method not allowed" }, { allow: "POST" });
@@ -136,7 +178,14 @@ async function handleDelete(ctx, req, res) {
   return sendJson(res, 200, { ok: true });
 }
 
+/**
+ * Cordis 外掛入口：向 webServer 註冊精確匹配的刪除路由。
+ *
+ * @param {object} ctx Cordis 外掛執行期上下文（提供 webServer 服務）。
+ * @returns {void}
+ */
 export function apply(ctx) {
+  // 路由處理函式：直接委派給 handleDelete，並夾帶執行期上下文。
   const handler = (req, res) => handleDelete(ctx, req, res);
   ctx.effect(() => ctx.webServer.register({
     kind: "exact",

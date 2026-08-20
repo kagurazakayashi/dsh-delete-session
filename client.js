@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: "dsh-delete-session",
+  id: "@kagurazakayashi/dsh-delete-session",
   factory: () => {
     "use strict";
 
@@ -75,6 +75,16 @@ window.__ModuleLoader__.load({
     const HOUR = 3600000;
     const DAY = 86400000;
 
+    /**
+     * 將「最後更新距今」的毫秒差映射為與核心一致的時間分桶。
+     *
+     * 分桶順序：剛剛 → 分鐘 → 小時 → 天 → 月 → 年；閾值遞增，
+     * 首個小於閾值的分桶即回傳。
+     *
+     * @param {number} updatedAt 會話最後更新時間（Unix 毫秒）。
+     * @param {number} now 當前時間（Unix 毫秒）。
+     * @returns {{unit: string, n: number}} 分桶單位與數量。
+     */
     function relativeTimeBucket(updatedAt, now) {
       const diff = Math.max(0, now - updatedAt);
       if (diff < MIN) return { unit: "now", n: 0 };
@@ -91,6 +101,15 @@ window.__ModuleLoader__.load({
       en: { now: "now", minutes: "{n}min", hours: "{n}h", days: "{n}d", months: "{n}mo", years: "{n}y" }
     };
 
+    /**
+     * 依語系將時間分桶格式化為顯示文字。
+     *
+     * 語系不在支援範圍內、或模板不存在時回傳 null，交由呼叫端處理。
+     *
+     * @param {{unit: string, n: number}} bucket 時間分桶（單位與數量）。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @returns {string|null} 格式化後的時間標籤，或 null。
+     */
     function formatTimeLabel(bucket, locale) {
       const templates = TIME_TEMPLATES[locale];
       if (!templates) return null;
@@ -103,10 +122,24 @@ window.__ModuleLoader__.load({
     // 核心的 aria-label 模板：zh「会话“{name}”的操作」、en「Session actions for {name}」。
     const SESSION_ARIA_PREFIXES = ["会话“", "Session actions for "];
 
+    /**
+     * 判斷節點是否為 DOM 元素節點（nodeType === 1）。
+     *
+     * @param {*} node 欲判斷的節點（可能為 null、文字節點或元素）。
+     * @returns {boolean} 是元素節點時回傳 true。
+     */
     function isElement(node) {
       return node !== null && typeof node === "object" && node.nodeType === 1;
     }
 
+    /**
+     * 判斷節點是否為「會話行 … 按鈕」。
+     *
+     * 以 aria-label 是否以任一語系前綴開頭為準（zh/en 兩語系）。
+     *
+     * @param {*} node 欲判斷的節點。
+     * @returns {boolean} 是會話行操作按鈕時回傳 true。
+     */
     function isSessionAnchorButton(node) {
       if (!isElement(node) || node.tagName !== "BUTTON") return false;
       const label = node.getAttribute("aria-label") || "";
@@ -123,6 +156,13 @@ window.__ModuleLoader__.load({
 
     // ---------- 行 DOM 讀取 ----------
     // 結構：button → span(root，Menu 根) → span(rowActions) → 前一兄弟為時間 span → 再前一兄弟為標題 span。
+    /**
+     * 從會話行 DOM 讀取實際渲染出的標題與相對時間文字。
+     *
+     * @param {HTMLButtonElement} button 會話行「…」按鈕。
+     * @returns {{title: string, time: string}|null} 標題與去頭尾空白後的
+     *   時間文字；DOM 結構不符預期時回傳 null。
+     */
     function readRowTexts(button) {
       const rowActions = button.parentElement ? button.parentElement.parentElement : null;
       if (!rowActions) return null;
@@ -136,6 +176,19 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 雙條件唯一匹配 ----------
+    /**
+     * 以「displayTitle + 相對時間」雙條件在會話清單中做唯一匹配。
+     *
+     * 僅當命中數量恰為 1 時回傳該會話，否則回傳 null（避免誤刪）。
+     * blank 會話、subagent 會話與已歸檔會話一律排除。
+     *
+     * @param {object} list 會話清單快照（含 ids 陣列與 byId 對照表）。
+     * @param {string} title 目標顯示標題。
+     * @param {string} timeText 目標相對時間文字。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @param {string[]|null} archivedIds 已歸檔會話 id 陣列，或 null。
+     * @returns {object|null} 唯一命中的會話摘要，或 null。
+     */
     function findUniqueSession(list, title, timeText, locale, archivedIds) {
       if (!list || !Array.isArray(list.ids) || !list.byId) return null;
       const archived = archivedIds ? new Set(archivedIds) : null;
@@ -157,6 +210,15 @@ window.__ModuleLoader__.load({
 
     // ---------- 錨點按鈕定位 ----------
     // 優先使用最近一次點開的按鈕；若不可用，則以彈層幾何位置回退。
+    /**
+     * 定位開啟此選單的會話行「…」按鈕。
+     *
+     * 優先使用最近一次點開且仍在時效（ANCHOR_FRESH_MS）內的按鈕；否則
+     * 以選單彈層的幾何位置（左下角）在所有會話按鈕中找距離最近者。
+     *
+     * @param {HTMLElement} menuEl 選單彈層元素。
+     * @returns {HTMLButtonElement|null} 錨點按鈕，或 null（無法定位）。
+     */
     function resolveAnchorButton(menuEl) {
       if (lastAnchorButton && lastAnchorButton.isConnected && Date.now() - lastAnchorAt < ANCHOR_FRESH_MS && isSessionAnchorButton(lastAnchorButton)) {
         return lastAnchorButton;
@@ -175,6 +237,7 @@ window.__ModuleLoader__.load({
           best = button;
         }
       }
+      // 距離分數小於 200 像素才視為合理錨點，避免誤配到距離遙遠的按鈕。
       return bestScore < 200 ? best : null;
     }
 
@@ -189,12 +252,26 @@ window.__ModuleLoader__.load({
     const ARM_HOLD_MS = 8000;
     const armedSessions = new Map(); // sessionId → 解除警示的計時器 id
 
+    /**
+     * 解除指定會話的警示（兩段式確認）狀態，並清除其倒數計時器。
+     *
+     * @param {string} sessionId 會話唯一識別碼。
+     * @returns {void}
+     */
     function disarmSession(sessionId) {
       const timer = armedSessions.get(sessionId);
       if (timer !== undefined) clearTimeout(timer);
       armedSessions.delete(sessionId);
     }
 
+    /**
+     * 將指定會話切換為「已點擊一次」的警示狀態。
+     *
+     * 啟動 ARM_HOLD_MS 倒數；期間重複呼叫會重置倒數（見 disarmSession）。
+     *
+     * @param {string} sessionId 會話唯一識別碼。
+     * @returns {void}
+     */
     function armSession(sessionId) {
       disarmSession(sessionId); // 重複點擊時重置倒數。
       const timer = setTimeout(() => {
@@ -203,16 +280,36 @@ window.__ModuleLoader__.load({
       armedSessions.set(sessionId, timer);
     }
 
+    /**
+     * 查詢指定會話目前是否處於警示（已點擊一次）狀態。
+     *
+     * @param {string} sessionId 會話唯一識別碼。
+     * @returns {boolean} 處於警示狀態時回傳 true。
+     */
     function isSessionArmed(sessionId) {
       return armedSessions.has(sessionId);
     }
 
+    /**
+     * 解除所有會話的警示狀態並清除全部倒數計時器。
+     *
+     * 用於外掛卸載（apply 清理）時，避免殘留計時器。
+     *
+     * @returns {void}
+     */
     function disarmAllSessions() {
       for (const timer of armedSessions.values()) clearTimeout(timer);
       armedSessions.clear();
     }
 
     // 將選單項切換為警示外觀：紅底、白字、警告圖標與「再次點擊刪除」文案。
+    /**
+     * 將「刪除會話」選單項就地切換為警示外觀（無需重新注入）。
+     *
+     * @param {HTMLButtonElement} button 已注入的刪除選單項。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @returns {void}
+     */
     function renderArmed(button, locale) {
       button.setAttribute("data-dsh-delete-session-armed", "1");
       const iconSpan = button.firstElementChild;
@@ -221,6 +318,19 @@ window.__ModuleLoader__.load({
       if (labelSpan) labelSpan.textContent = STRINGS[locale].menuDeleteConfirm;
     }
 
+    /**
+     * 將「刪除會話」項目注入到「歸檔會話」項目的正下方。
+     *
+     * 透過複製歸檔項目以繼承樣式（含類別雜湊），並綁定兩段式確認點擊。
+     * 同一個選單內已注入過（或帶有標記）時不重複注入。
+     *
+     * @param {HTMLElement} menuEl 會話行選單彈層。
+     * @param {HTMLButtonElement} archiveButton 「歸檔會話」選單項。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @param {object} session 目標會話摘要（含 id）。
+     * @param {HTMLButtonElement} anchor 會話行「…」錨點按鈕。
+     * @returns {void}
+     */
     function injectItem(menuEl, archiveButton, locale, session, anchor) {
       if (menuEl.querySelector("[" + DELETE_ITEM_ATTR + "]") !== null) return;
       const wrap = archiveButton.parentElement;
@@ -264,6 +374,15 @@ window.__ModuleLoader__.load({
 
     // 關閉選單：優先點擊錨點按鈕觸發 React 的 toggle；失敗則派發
     // pointerdown 讓 Menu 的 outside-close 邏輯接管。
+    /**
+     * 嘗試關閉目前開啟的會話行選單。
+     *
+     * 優先點擊錨點按鈕觸發 React 的 toggle；失敗則派發 pointerdown 事件
+     * 讓 Menu 的 outside-close 邏輯接管。關閉失敗不拋出例外。
+     *
+     * @param {HTMLButtonElement} anchor 會話行「…」錨點按鈕。
+     * @returns {void}
+     */
     function closeOpenMenu(anchor) {
       if (anchor && anchor.isConnected) {
         try {
@@ -285,6 +404,11 @@ window.__ModuleLoader__.load({
     let modalRoot = null;
     let modalState = null;
 
+    /**
+     * 取得（必要時建立）錯誤彈窗的根容器元素。
+     *
+     * @returns {HTMLElement} 彈窗根容器。
+     */
     function ensureModalRoot() {
       if (!modalRoot || !modalRoot.isConnected) {
         modalRoot = document.createElement("div");
@@ -294,6 +418,11 @@ window.__ModuleLoader__.load({
       return modalRoot;
     }
 
+    /**
+     * 關閉並移除錯誤彈窗，同時釋放其事件監聽器。
+     *
+     * @returns {void}
+     */
     function closeModal() {
       if (modalState) {
         modalState.dispose();
@@ -303,6 +432,16 @@ window.__ModuleLoader__.load({
       modalRoot = null;
     }
 
+    /**
+     * 顯示純 DOM 建構的錯誤彈窗（不依賴 React）。
+     *
+     * 僅用於刪除失敗時提示原因，不含任何確認按鈕，支援 Escape 鍵與
+     * 點擊遮罩關閉。
+     *
+     * @param {string} message 錯誤描述文字。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @returns {void}
+     */
     function showErrorModal(message, locale) {
       closeModal();
       const strings = STRINGS[locale];
@@ -339,16 +478,19 @@ window.__ModuleLoader__.load({
       overlay.appendChild(card);
       root.appendChild(overlay);
 
+      // 清理函式：卸載彈窗時移除事件監聽器。
       const dispose = () => {
         document.removeEventListener("keydown", onKeyDown, true);
         overlay.removeEventListener("click", onOverlayClick);
       };
+      // Escape 鍵關閉彈窗（捕獲階段，避免與其它快捷鍵衝突）。
       const onKeyDown = (event) => {
         if (event.key === "Escape") {
           event.stopPropagation();
           closeModal();
         }
       };
+      // 點擊遮罩（非卡片本身）時關閉彈窗。
       const onOverlayClick = (event) => {
         if (event.target === overlay) closeModal();
       };
@@ -362,6 +504,16 @@ window.__ModuleLoader__.load({
       okButton.focus();
     }
 
+    /**
+     * 呼叫 host 端刪除路由，並處理成功／失敗後的介面更新。
+     *
+     * 失敗時依錯誤碼顯示對應文案；成功時刷新 sessions 與 workspaces
+     * 清單（刷新失敗僅忽略，不影響已完成的刪除）。
+     *
+     * @param {object} session 目標會話摘要（含 id）。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @returns {Promise<void>}
+     */
     async function deleteSession(session, locale) {
       const strings = STRINGS[locale];
       let response;
@@ -406,6 +558,14 @@ window.__ModuleLoader__.load({
     // ---------- 前端資料就緒判斷 ----------
     // sessions 清單 phase 為 "ready" 代表基準清單已從 host 拉取完成；
     // workspaces 的 baselinesReady 同時要求兩者皆 ready（見核心 WorkspaceRuntime.project）。
+    /**
+     * 判斷前端會話／工作區資料是否已就緒。
+     *
+     * sessions 清單 phase 須為 "ready"；workspaces 清單 phase 須為
+     * "ready" 且 baselinesReady 為 true，兩者皆成立才回傳 true。
+     *
+     * @returns {boolean} 資料已就緒時回傳 true。
+     */
     function frontendDataReady() {
       try {
         const sessions = activeCtx.sessions.list.getSnapshot();
@@ -419,6 +579,14 @@ window.__ModuleLoader__.load({
     }
 
     // 以「歸檔會話」項目判定是否為會話行選單並回傳語系；否則回傳 null。
+    /**
+     * 偵測選單是否為會話行選單，並回傳其語系。
+     *
+     * 以是否存在「歸檔會話 / Archive session」文字項目為判定依據。
+     *
+     * @param {HTMLElement} menuEl 選單彈層元素。
+     * @returns {string|null} 語系代碼（"zh" 或 "en"），非會話選單時回傳 null。
+     */
     function detectSessionMenuLocale(menuEl) {
       for (const button of menuEl.querySelectorAll('[role="menuitem"]')) {
         const text = (button.textContent || "").trim();
@@ -430,6 +598,16 @@ window.__ModuleLoader__.load({
 
     // 完整解析注入目標：語系 + 歸檔項 + 該行 + 雙條件唯一匹配。
     // 回傳 null 代表此刻不應注入（非會話選單、行定位失敗或命中數量不為 1）。
+    /**
+     * 完整解析注入所需的全部資訊（語系、歸檔項、錨點、會話）。
+     *
+     * 任一步驟失敗（非會話選單、行定位失敗或雙條件命中數量不為 1）即
+     * 回傳 null，表示此刻不應注入。
+     *
+     * @param {HTMLElement} menuEl 會話行選單彈層。
+     * @returns {{locale: string, archiveButton: HTMLButtonElement,
+     *   anchor: HTMLButtonElement, session: object}|null} 注入目標，或 null。
+     */
     function resolveInjectionTarget(menuEl) {
       const locale = detectSessionMenuLocale(menuEl);
       if (locale === null) return null;
@@ -472,6 +650,15 @@ window.__ModuleLoader__.load({
     // 確保資料仍就緒、選單仍在 DOM、唯一命中仍成立，然後才介入 DOM。
     const pendingInjections = new Map(); // 選單元素 → setTimeout id（僅延時開啟時使用）
 
+    /**
+     * 執行一次完整注入（重新解析並介入 DOM）。
+     *
+     * 在排程觸發時（或延時關閉的同步路徑）呼叫；會再次確認選單仍在 DOM、
+     * 資料仍就緒且唯一命中仍成立，然後才實際注入。
+     *
+     * @param {HTMLElement} menuEl 會話行選單彈層。
+     * @returns {void}
+     */
     function performInjection(menuEl) {
       if (!menuEl.isConnected) return;
       if (menuEl.querySelector("[" + DELETE_ITEM_ATTR + "]") !== null) return;
@@ -481,6 +668,14 @@ window.__ModuleLoader__.load({
       injectItem(menuEl, target.archiveButton, target.locale, target.session, target.anchor);
     }
 
+    /**
+     * 依 INJECT_DELAY_MS 排程注入（延時關閉時直接同步注入）。
+     *
+     * 對同一選單僅排程一次，避免重複建立計時器。
+     *
+     * @param {HTMLElement} menuEl 會話行選單彈層。
+     * @returns {void}
+     */
     function scheduleInjection(menuEl) {
       if (pendingInjections.has(menuEl)) return;
       // 延時關閉（INJECT_DELAY_MS 為 0）：不建立計時器，直接同步注入。
@@ -495,6 +690,15 @@ window.__ModuleLoader__.load({
       pendingInjections.set(menuEl, timer);
     }
 
+    /**
+     * 判斷選單是否符合注入條件並進入排程。
+     *
+     * 符合條件：外掛已套用（activeCtx 非空）、選單為元素、尚未注入、
+     * 前端資料已就緒且確認為會話行選單。
+     *
+     * @param {HTMLElement} menuEl 候選選單元素。
+     * @returns {void}
+     */
     function maybeInject(menuEl) {
       if (!activeCtx) return;
       if (!isElement(menuEl)) return;
@@ -507,6 +711,13 @@ window.__ModuleLoader__.load({
     }
 
     // 掃描目前所有開啟的選單（供重注入使用）。
+    /**
+     * 掃描頁面上所有開啟的 role="menu"，逐一嘗試注入。
+     *
+     * 供 React 重繪移除注入項後的重注入使用。
+     *
+     * @returns {void}
+     */
     function injectIntoOpenMenus() {
       for (const menuEl of document.querySelectorAll('[role="menu"]')) {
         maybeInject(menuEl);
@@ -532,6 +743,11 @@ window.__ModuleLoader__.load({
       ".dshds-btn-ok:hover{background:var(--dsw-alias-interactive-bg-hover);}"
     ].join("\n");
 
+    /**
+     * 注入外掛樣式表（冪等，已存在時不重複注入）。
+     *
+     * @returns {void}
+     */
     function mountStyle() {
       if (typeof document === "undefined") return;
       if (document.querySelector(STYLE_SELECTOR) !== null) return;
@@ -542,6 +758,11 @@ window.__ModuleLoader__.load({
       document.head.appendChild(tag);
     }
 
+    /**
+     * 移除外掛樣式表（外掛卸載時呼叫）。
+     *
+     * @returns {void}
+     */
     function unmountStyle() {
       if (typeof document === "undefined") return;
       const tag = document.querySelector(STYLE_SELECTOR);
@@ -549,6 +770,12 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- MutationObserver ----------
+    /**
+     * 收集指定根元素（含其本身與後代）中的所有選單元素。
+     *
+     * @param {HTMLElement} rootEl 欲掃描的根元素。
+     * @returns {HTMLElement[]} 找到的 role="menu" 元素陣列。
+     */
     function collectMenus(rootEl) {
       const menus = [];
       if (rootEl.matches('[role="menu"]')) menus.push(rootEl);
@@ -556,6 +783,15 @@ window.__ModuleLoader__.load({
       return menus;
     }
 
+    /**
+     * MutationObserver 回呼：處理新增／移除節點。
+     *
+     * 新增節點內若含有選單即嘗試注入；若偵測到我們注入的項目被移除
+     * （React 重繪），於微任務內重新掃描並注入。
+     *
+     * @param {MutationRecord[]} mutations 本批變動紀錄。
+     * @returns {void}
+     */
     function onBodyMutations(mutations) {
       let removedOurs = false;
       for (const mutation of mutations) {
@@ -584,6 +820,14 @@ window.__ModuleLoader__.load({
     // ---------- Cordis apply ----------
     const inject = ["sessions", "workspaces"];
 
+    /**
+     * 瀏覽器端外掛入口：掛載樣式、點擊捕捉與 MutationObserver。
+     *
+     * 回傳的 cleanup 會移除全部監聽器、計時器、彈窗與樣式，確保卸載乾淨。
+     *
+     * @param {object} ctx 客戶端執行期上下文（提供 sessions、workspaces）。
+     * @returns {void}
+     */
     function apply(ctx) {
       activeCtx = ctx;
       mountStyle();

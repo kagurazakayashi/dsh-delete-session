@@ -3,4 +3,4 @@
 # cordis.patch.yml and any --patch overlays can still override this row by id.
 - insert:
     - id: delete-session
-      name: dsh-delete-session
+      name: '@kagurazakayashi/dsh-delete-session'
