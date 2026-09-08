@@ -28,7 +28,7 @@ After the restart, refresh the page and open any session row's `…` menu — **
 
 - Host side (`index.js`) registers `POST /delete-session/delete`.
 - Browser side (`client.js`) watches for session-row `…` menu popups and injects a **Delete session** item below **Archive session** (zh / en bilingual).
-- **Two-step deletion, no confirmation dialog**: the first click switches the menu item to an in-place warning state (red background, warning icon, "Click again to delete" / "再次点击删除") without closing the menu or showing a dialog; the second click actually calls the delete route, then refreshes the session and workspace lists.
+- **Two-step deletion, no confirmation dialog**: the first click switches the menu item to an in-place warning state (red background, warning icon, "Click again to delete" / "再次点击删除") without closing the menu or showing a dialog; the second click actually calls the delete route, then refreshes the session list.
 - The warning state is remembered per session id (in-memory, auto-disarms after 8 seconds); reopening the menu within that window still shows the warning state. A failed deletion also disarms it.
 - Deletion failures show a lightweight error notice (plain DOM, not a confirm dialog) explaining the reason (session busy / not found / network error, etc.).
 - **Running sessions are refused** (HTTP 409): only sessions whose agent status is not `idle` (i.e. running a task) are rejected, to avoid corrupting a log that is still being written. Idle sessions that were merely opened and then switched away (still resident in memory) can be deleted normally.
@@ -43,6 +43,7 @@ After clicking the `…` button on a session row, the opened menu looks like thi
 Session row menu
 
 ├─ Rename session     (core)
+├─ Fork session       (core)
 ├─ Archive session    (core)
 └─ Delete session     ← injected by this plugin (zh / en)
 ```
@@ -146,14 +147,42 @@ After refreshing the page, open any session row's `…` menu; eligible rows show
 
 - **Running sessions refused**: `ctx.agents.get(id)?.status !== 'idle'` returns 409, and a second check runs right before deletion. Only idle sessions resident in memory are exempt.
 - **Auto-archive before delete**: the destructive `rm` is preceded by `workspaceRegistry.archiveSession(id)`, which lets the sidebar hide the session immediately via the `host/archived-sessions-changed` broadcast (and lets the client auto-clear the current selection), so it does not linger in the list until restart. Archiving is idempotent; a failure does not block the main deletion flow.
-- **Raw artifact backend required**: the persistence backend must expose `supportsRawArtifacts === true` and a `locate()` returning `{ kind: 'jsonl', path }`, otherwise it returns 501.
-- **Deletes only the session directory**: `rm(dirname(location.path), { recursive: true, force: false })`; an archive marker is written first, but workspace groups, projection caches, and shared attachments are left untouched.
+- **Session locating strategy**: the core no longer exposes the `supportsRawArtifacts` flag. The plugin first calls the JSONL backend's public API `resolveCurrentLog(id)` (async, returning the absolute path of the current-format-generation log); for sessions that have not been migrated yet — filenames without a `vN` marker — it returns `undefined` (on this machine only 4 of 89 existing sessions were in the new format), so the plugin falls back to the backend's still-present-at-runtime `locate(header)` (returning `{ kind, path }`). When neither yields a path it returns 501. If the backend throws an error carrying `kind: 'jsonl'` and `path` diagnostics (for example a log in a newer version), the plugin reuses that path to complete the deletion.
+- **Deletes only the session directory**: `rm(dirname(logPath), { recursive: true, force: false })`; an archive marker is written first, but workspace groups, projection caches, and shared attachments are left untouched. Before deleting, the target directory name must be **exactly the session id** (the backend names it with `encodeSegment(id)`, and session ids only contain `[A-Za-z0-9._-]`), so the whole project directory can never be recursively removed.
 - **Irreversible**: deletion is a recursive `rm` with no recycle bin; operate with care.
 - **In-memory two-step state**: the warning state lives only in browser memory (per session id, 8-second window) and disappears on plugin unmount, page refresh, or timeout; no persistent state is produced.
 - **Conservative same-name policy**: if two rows share both the same title and the same relative time (match count ≥2), neither gets a delete item.
-- **Inherent DOM-injection fragility**: this plugin depends on the core UI's DOM structure (`button → span.root → span.rowActions → time span → title span`) and the "Archive session" menu-item text. If DSH changes either in an upgrade, injection fails silently (no error, and no accidental deletion); `client.js` must then be updated to match the new structure.
+- **Inherent DOM-injection fragility**: this plugin depends on the core UI's DOM structure (`div.sessionRow > span.title / span.time / span.rowActions > Menu root span > button`) and the "Archive session" menu-item text. The title is parsed first from the `…` button's `aria-label` (`会话“{name}”的操作` / `Session actions for {name}`) and only falls back to DOM derivation, so the core's new "active schedule" indicator element cannot break the match. If DSH changes the structure or the wording in an upgrade, injection fails silently (no error, and no accidental deletion); `client.js` must then be updated to match the new structure.
 - **Relative-time boundary drift**: the row's relative time is computed by the core at render time, while matching recomputes it with the current time; near a bucket boundary this may yield 0 matches and no injection (conservative and safe).
 - **No injection before data is ready**: opening the menu during early startup (before the session/workspace lists are pulled from the host) shows no delete item; reopen the menu once data is ready. If data arrives and triggers a repaint while the menu stays open, the observer re-injects automatically.
+
+## Version compatibility
+
+The DSH versions and runtime environment this plugin targets:
+
+| Item                | Version / notes                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Targeted DSH core   | minimum `0.1.3-alpha.2` (API-level check); runtime-verified on `0.1.5-rc.1` (sub-packages `0.1.5-rc.2`)                        |
+| Plugin version      | `1.0.4`                                                                                                                        |
+| Persistence backend | `@deepseek-ai/dsh-session-persistence-jsonl` (must provide `resolveCurrentLog` or `locate`)                                    |
+| Client inject deps  | `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-api-workspace-controller`, `@deepseek-ai/dsh-client-ui-workspace` |
+
+Breaking core changes adopted in `1.0.4`:
+
+| Core change              | Old usage (≤ `1.0.3`)                                | New usage (`1.0.4`)                                      |
+| ------------------------ | ---------------------------------------------------- | -------------------------------------------------------- |
+| Session list snapshot    | top-level `id` on each `list()` item                 | `header.id` on each `list()` item                        |
+| Locating the session log | `supportsRawArtifacts` + `locate(meta)`              | `resolveCurrentLog(id)` first, `locate(header)` fallback |
+| Workspace snapshot       | `workspaces.baselinesReady`                          | only `workspaces.phase === "ready"`                      |
+| Workspace refresh        | `workspaces.refresh()`                               | removed; refresh `sessions` only                         |
+| Client inject deps       | `@deepseek-ai/dsh-client-runtime` (no longer exists) | existing `dsh-api-*-controller` packages                 |
+
+| Plugin version | Usable core versions | Basis                                                                                                                                                                   |
+| -------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1.0.4`        | `>= 0.1.3-alpha.2`   | `sessionPersistence.list()` returns `SessionPersistenceSnapshot` from that version on (id in `header.id`), and `resolveCurrentLog()` is available from the same version |
+| `1.0.3`        | `<= 0.1.2-rc.1`      | In that range `list()` returns `SessionHeader[]` (id at the top level) and `locate()` / `supportsRawArtifacts` are still public base-class API                          |
+
+The two ranges do not overlap: `0.1.3-alpha.2` changed the `list()` return type and removed the base-class `locate()` / `supportsRawArtifacts` in the same release, so no single core version runs both plugin versions. `1.0.4` cannot be used on `0.1.2-rc.1` or earlier.
 
 ## Uninstall
 

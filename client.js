@@ -18,13 +18,12 @@ window.__ModuleLoader__.load({
     //   2. 以 MutationObserver 監聽 document.body 新增的 role="menu"
     //      彈層；若其含有「歸檔會話 / Archive session」項目，即判定為
     //      會話行選單。
-    //   3. 依 DOM 結構（button → span(root) → span(rowActions) →
-    //      前一兄弟為時間 span → 再前一兄弟為標題 span）讀取該行實際
-    //      渲染出來的標題與相對時間文字。
-    //   4. 注入前先確認前端資料已載入完成：sessions 清單 phase 為
-    //      "ready"，workspaces 清單 phase 為 "ready" 且 baselinesReady
-    //      為 true；資料未就緒時不干涉（資料到達會觸發側邊欄重繪，
-    //      選單仍開啟時 MutationObserver 會再次進入並補注入）。
+    //   3. 依 DOM 結構（button → Menu 根 span → span(rowActions)）讀取該行
+    //      實際渲染出來的標題與相對時間文字；標題優先由按鈕的
+    //      aria-label 解析，失敗時才退回 DOM 結構推導。
+    //   4. 注入前先確認前端資料已載入完成：sessions 與 workspaces 清單的
+    //      phase 皆為 "ready"；資料未就緒時不干涉（資料到達會觸發側邊欄
+    //      重繪，選單仍開啟時 MutationObserver 會再次進入並補注入）。
     //   5. 注入前的額外延時由 INJECT_DELAY_MS 控制：為 0 時「完全關閉
     //      延時」直接同步注入（不建立計時器）；設為正數才啟用延時。
     //   6. 以 displayTitle + 相對時間（與核心相同的分桶演算法）做雙
@@ -121,6 +120,8 @@ window.__ModuleLoader__.load({
     // ---------- 會話行「…」按鈕辨識 ----------
     // 核心的 aria-label 模板：zh「会话“{name}”的操作」、en「Session actions for {name}」。
     const SESSION_ARIA_PREFIXES = ["会话“", "Session actions for "];
+    // zh 模板的收尾字串；en 模板沒有收尾字串。
+    const SESSION_ARIA_ZH_SUFFIX = "”的操作";
 
     /**
      * 判斷節點是否為 DOM 元素節點（nodeType === 1）。
@@ -155,7 +156,34 @@ window.__ModuleLoader__.load({
     let lastAnchorAt = 0;
 
     // ---------- 行 DOM 讀取 ----------
-    // 結構：button → span(root，Menu 根) → span(rowActions) → 前一兄弟為時間 span → 再前一兄弟為標題 span。
+    /**
+     * 由錨點按鈕的 aria-label 解析會話的顯示標題。
+     *
+     * aria-label 由核心以 `t("actions.session.aria", { name: title })` 產生，
+     * 其中的 title 即為該行實際渲染的 displayTitle，因此比讀取 DOM 文字
+     * 更可靠（不受同行其它指示元素影響）。
+     *
+     * @param {HTMLButtonElement} button 會話行「…」按鈕。
+     * @returns {string|null} 解析出的標題；語系模板不符時回傳 null。
+     */
+    function titleFromAriaLabel(button) {
+      const label = button.getAttribute("aria-label") || "";
+      const zhPrefix = SESSION_ARIA_PREFIXES[0];
+      if (label.startsWith(zhPrefix) && label.endsWith(SESSION_ARIA_ZH_SUFFIX)) {
+        return label.slice(zhPrefix.length, label.length - SESSION_ARIA_ZH_SUFFIX.length);
+      }
+      const enPrefix = SESSION_ARIA_PREFIXES[1];
+      if (label.startsWith(enPrefix)) return label.slice(enPrefix.length);
+      return null;
+    }
+
+    // 現行 core 的會話行結構（Rows 模組）：
+    //   div.sessionRow(role=treeitem) > [span(slot)] span(title)
+    //   [ActiveScheduleIndicator] span(time) span(rowActions)
+    //   > Menu 根 span > button(aria-label)
+    // 其中 ActiveScheduleIndicator 只在「有活動定時任務」時插在標題與時間
+    // 之間，因此時間取 rowActions 緊鄰的前一兄弟；標題優先以 aria-label
+    // 解析，失敗時才往前掃描所有兄弟、取最靠左且帶有非空文字者。
     /**
      * 從會話行 DOM 讀取實際渲染出的標題與相對時間文字。
      *
@@ -167,12 +195,19 @@ window.__ModuleLoader__.load({
       const rowActions = button.parentElement ? button.parentElement.parentElement : null;
       if (!rowActions) return null;
       const timeSpan = rowActions.previousElementSibling;
-      const titleSpan = timeSpan ? timeSpan.previousElementSibling : null;
-      if (!timeSpan || !titleSpan) return null;
-      return {
-        title: titleSpan.textContent || "",
-        time: (timeSpan.textContent || "").trim()
-      };
+      if (!timeSpan) return null;
+      const time = (timeSpan.textContent || "").trim();
+      let title = titleFromAriaLabel(button);
+      if (title === null) {
+        let cursor = timeSpan.previousElementSibling;
+        while (cursor) {
+          const text = (cursor.textContent || "").trim();
+          if (text.length > 0) title = text;
+          cursor = cursor.previousElementSibling;
+        }
+      }
+      if (title === null || title.length === 0) return null;
+      return { title, time };
     }
 
     // ---------- 雙條件唯一匹配 ----------
@@ -545,9 +580,12 @@ window.__ModuleLoader__.load({
       }
       disarmSession(session.id);
       // 刪除已成功；刷新為盡力而為（與 dsh-archive-manager 相同）。
+      // workspaces 服務（IWorkspaces）已無 refresh()：歸檔
+      // 集合改由 host 的 archiveSession 結果與 follow 串流自動更新，因此
+      // 這裡只需刷新會話清單。
       if (activeCtx) {
         try {
-          await Promise.all([activeCtx.sessions.refresh(), activeCtx.workspaces.refresh()]);
+          await activeCtx.sessions.refresh();
         } catch {
           // 忽略刷新失敗：清單會在下次刷新或重新載入後消失。
         }
@@ -557,12 +595,13 @@ window.__ModuleLoader__.load({
     // ---------- 選單偵測與注入 ----------
     // ---------- 前端資料就緒判斷 ----------
     // sessions 清單 phase 為 "ready" 代表基準清單已從 host 拉取完成；
-    // workspaces 的 baselinesReady 同時要求兩者皆 ready（見核心 WorkspaceRuntime.project）。
+    // workspaces 的 phase 為 "ready" 代表工作區與歸檔集合基準已就緒。
     /**
      * 判斷前端會話／工作區資料是否已就緒。
      *
-     * sessions 清單 phase 須為 "ready"；workspaces 清單 phase 須為
-     * "ready" 且 baselinesReady 為 true，兩者皆成立才回傳 true。
+     * sessions 與 workspaces 清單的 phase 皆須為 "ready"。
+     * WorkspaceSnapshot 已移除 baselinesReady 欄位（僅保留 items、
+     * archivedSessionIds、state、phase、error），故不再檢查該欄位。
      *
      * @returns {boolean} 資料已就緒時回傳 true。
      */
@@ -571,7 +610,7 @@ window.__ModuleLoader__.load({
         const sessions = activeCtx.sessions.list.getSnapshot();
         if (sessions.phase !== "ready") return false;
         const workspaces = activeCtx.workspaces.list.getSnapshot();
-        if (workspaces.phase !== "ready" || workspaces.baselinesReady !== true) return false;
+        if (workspaces.phase !== "ready") return false;
         return true;
       } catch {
         return false;

@@ -8,9 +8,17 @@
 // 破壞性刪除前會先呼叫 workspaceRegistry.archiveSession，讓側欄經由
 // host/archived-sessions-changed 廣播即時隱藏該會話（同時優雅處理
 // 「當前會話」：客戶端會自動清空選擇），避免刪除後仍殘留於清單。
+//
+// 持久化 API 說明：
+//   - sessionPersistence.list() 現在回傳 SessionPersistenceSnapshot，
+//     會話 id 位於 snapshot.header.id（舊版的頂層 id 已移除）。
+//   - 舊版的 supportsRawArtifacts 旗標已被移除；公開的替代品是 JSONL 後端
+//     的非同步 resolveCurrentLog(id)，但它只對「檔名已帶當前格式版本標記」
+//     的日誌回報路徑（本機實測 89 個既有會話中僅 4 個如此），因此另以
+//     後端執行期仍提供的 locate(header) 作為舊格式會話的回退。
 
 import { rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 
 // 穩定的 Cordis 外掛名稱與所需的 host 服務。
 export const name = "delete-session";
@@ -56,6 +64,64 @@ function isSessionRunning(ctx, sessionId) {
 }
 
 /**
+ * 解析某個會話在磁碟上的日誌檔絕對路徑。
+ *
+ * 依序嘗試兩個來源；兩者回報的檔案都位於同一個「會話目錄」內，因此呼叫端
+ * 只需取其 dirname：
+ *
+ *   1. `sessionPersistence.resolveCurrentLog(id)`：JSONL
+ *      後端（`@deepseek-ai/dsh-session-persistence-jsonl`）的公開 API，
+ *      非同步回報「當前格式世代」日誌檔的絕對路徑。對尚未遷移的舊格式
+ *      會話（檔名不帶 `vN` 標記）會回傳 undefined，對更新的未知格式則
+ *      拋出帶有 `kind` / `path` 診斷資訊的錯誤。
+ *   2. `sessionPersistence.locate(header)`：後端內部（TypeScript 標記為
+ *      private）但執行期存在的方法，回傳 `{ kind, path }`；其 path 是
+ *      「當前世代的目標檔名」，不檢查檔案是否存在，因此對舊格式會話也
+ *      能給出正確的會話目錄。舊版外掛即以此定位（當時旗標為
+ *      supportsRawArtifacts + locate）。
+ *
+ * 只有兩個來源都無法給出可用路徑時才回報失敗，藉此同時涵蓋新舊格式會話，
+ * 且不因任一私有成員被移除而完全失效。
+ *
+ * @param {object} ctx 外掛執行期上下文（提供 sessionPersistence 服務）。
+ * @param {string} sessionId 會話唯一識別碼。
+ * @param {object} snapshot sessionPersistence.list() 回傳的持久化快照。
+ * @returns {Promise<{path: string}|{path: null, code: string, message: string}>}
+ *   解析結果；失敗時 path 為 null，並附上錯誤碼與訊息。
+ */
+async function locateLogPath(ctx, sessionId, snapshot) {
+  const backend = ctx.sessionPersistence;
+  const canResolve = typeof backend.resolveCurrentLog === "function";
+  const canLocate = typeof backend.locate === "function";
+  if (!canResolve && !canLocate) {
+    return { path: null, code: "NO_RAW_ARTIFACTS", message: "session persistence backend does not expose raw artifact locations" };
+  }
+  if (canResolve) {
+    try {
+      const resolved = await backend.resolveCurrentLog(sessionId);
+      if (typeof resolved === "string" && resolved.length > 0) return { path: resolved };
+    } catch (error) {
+      // 失敗仍可能附帶 kind/path 診斷（例如日誌屬於更新的未知格式）；
+      // 該路徑本身依然可安全刪除，故直接沿用。
+      if (error !== null && typeof error === "object" && error.kind === "jsonl" && typeof error.path === "string" && error.path.length > 0) {
+        return { path: error.path };
+      }
+    }
+  }
+  if (canLocate) {
+    try {
+      const location = backend.locate(snapshot.header);
+      if (location !== null && typeof location === "object" && typeof location.path === "string" && location.path.length > 0) {
+        return { path: location.path };
+      }
+    } catch {
+      // 落到下方的統一失敗回應。
+    }
+  }
+  return { path: null, code: "NO_JSONL_LOCATION", message: "session persistence backend has no jsonl artifact location" };
+}
+
+/**
  * 以 UTF-8 編碼讀取 HTTP 請求本文。
  *
  * 讀取過程中若累計位元組數超過 `cap` 上限，即拋出帶有
@@ -84,9 +150,9 @@ async function readBody(req, cap) {
  * 處理 POST /delete-session/delete 的刪除請求。
  *
  * 完整流程：校驗方法與請求本文 → 解析 JSON → 校驗 sessionId →
- * 執行中會話守衛（前後各一次）→ 查詢持久化中繼資料 → 定位原始 JSONL
- * 工件目錄 → 歸檔（盡力而為）→ 遞迴刪除磁碟目錄。每一步失敗都會回傳
- * 對應的錯誤碼與 HTTP 狀態碼。
+ * 執行中會話守衛（前後各一次）→ 查詢持久化中繼資料 → 以
+ * resolveCurrentLog 定位會話目錄 → 歸檔（盡力而為）→ 遞迴刪除磁碟
+ * 目錄。每一步失敗都會回傳對應的錯誤碼與 HTTP 狀態碼。
  *
  * @param {object} ctx 外掛執行期上下文（提供 sessions、agents、
  *   sessionPersistence、workspaceRegistry 等服務）。
@@ -128,29 +194,33 @@ async function handleDelete(ctx, req, res) {
     return sendJson(res, 409, { ok: false, code: "LIVE_SESSION", error: "cannot delete a running session" });
   }
 
-  let meta;
+  // 查詢持久化中繼資料，確認該會話確實存在於磁碟上。
+  // 現行 core 的 list() 回傳 SessionPersistenceSnapshot，會話 id 位於
+  // snapshot.header.id（舊版的頂層 id 欄位已移除）。
+  let snapshot;
   try {
     const listed = await ctx.sessionPersistence.list();
-    meta = listed.find((candidate) => candidate.id === sessionId);
+    snapshot = listed.find((candidate) => candidate?.header?.id === sessionId);
   } catch {
     return sendJson(res, 500, { ok: false, code: "LIST_FAILED", error: "failed to list persisted sessions" });
   }
-  if (meta === undefined) {
+  if (snapshot === undefined) {
     return sendJson(res, 404, { ok: false, code: "NOT_FOUND", error: "no persisted session with that id" });
   }
 
-  // 後端必須能指向原始 JSONL 工件目錄。
-  if (ctx.sessionPersistence.supportsRawArtifacts !== true || typeof ctx.sessionPersistence.locate !== "function") {
-    return sendJson(res, 501, { ok: false, code: "NO_RAW_ARTIFACTS", error: "session persistence backend does not expose raw artifact locations" });
+  // 定位該會話在磁碟上的日誌檔路徑，再取其父目錄作為「會話目錄」。
+  const located = await locateLogPath(ctx, sessionId, snapshot);
+  if (located.path === null) {
+    return sendJson(res, 501, { ok: false, code: located.code, error: located.message });
   }
-  let location;
-  try {
-    location = ctx.sessionPersistence.locate(meta);
-  } catch {
-    return sendJson(res, 501, { ok: false, code: "LOCATE_FAILED", error: "session persistence backend could not locate the artifact" });
-  }
-  if (location === null || typeof location !== "object" || location.kind !== "jsonl" || typeof location.path !== "string" || location.path.length === 0) {
-    return sendJson(res, 501, { ok: false, code: "NO_JSONL_LOCATION", error: "session persistence backend has no jsonl artifact location" });
+
+  // 縱深防禦：會話目錄名稱必須正好等於會話 id。後端以 encodeSegment(id) 為
+  // 目錄命名，而會話 id 僅含 [A-Za-z0-9._-]（UUID 或 session-<UUID>），
+  // 故兩者相同；不符時拒絕刪除，避免任何情況下遞迴刪除到整個 project
+  // 目錄（災難性誤刪）。
+  const sessionDir = dirname(located.path);
+  if (basename(sessionDir) !== sessionId) {
+    return sendJson(res, 501, { ok: false, code: "UNEXPECTED_LAYOUT", error: "resolved artifact is not inside a session directory" });
   }
 
   // 破壞性刪除前的最後一次執行中檢查（與上方守衛之間的短暫窗口內，
@@ -170,7 +240,7 @@ async function handleDelete(ctx, req, res) {
   }
 
   try {
-    await rm(dirname(location.path), { recursive: true, force: false });
+    await rm(sessionDir, { recursive: true, force: false });
   } catch {
     return sendJson(res, 500, { ok: false, code: "DELETE_FAILED", error: "failed to delete the session directory" });
   }
