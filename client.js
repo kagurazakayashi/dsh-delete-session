@@ -1,7 +1,10 @@
 window.__ModuleLoader__.load({
   id: "@kagurazakayashi/dsh-delete-session",
-  factory: () => {
+  factory: (require) => {
     "use strict";
+
+    // shell 以凍結的 seed 模組表提供 React；設定卡片（React 元件）用它渲染。
+    const React = require("react");
 
     // =====================================================================
     // dsh-delete-session（瀏覽器端）
@@ -34,6 +37,12 @@ window.__ModuleLoader__.load({
     //      （ARM_HOLD_MS 視窗），期間選單關閉重開仍會以警示狀態注入。
     //      刪除失敗時以純 DOM 錯誤彈窗提示；成功後刷新 sessions 與
     //      workspaces 清單。
+    //   8. 使用者設定：在設定頁「外掛 → 外掛設定」註冊一張本外掛的卡片
+    //      （settings.plugin.item，鍵為設定命名空間 "delete-session"），
+    //      讓使用者選擇刪除確認方式（再次點擊／彈出對話框／直接刪除）。
+    //      卡片以 settingsScope 讀寫 host 端已註冊的命名空間，值持久化到
+    //      $DSH_HOME/settings.yaml。目前版本的刪除流程仍固定使用
+    //      「再次點擊刪除」，卡片只負責顯示與記憶選擇。
     // =====================================================================
 
     const DELETE_ITEM_ATTR = "data-dsh-delete-session-item";
@@ -42,6 +51,26 @@ window.__ModuleLoader__.load({
     // 注入前的額外延時（毫秒）。設為 0 時「完全關閉延時」，直接同步注入，
     // 不使用 setTimeout（亦即不讓計時器計 0 秒）；設為正數才啟用延時。
     const INJECT_DELAY_MS = 0;
+
+    // ---------- 使用者設定（刪除確認方式） ----------
+    // 設定命名空間與欄位名稱必須與 host 端 index.js 保持一致。
+    const SETTINGS_NAMESPACE = "delete-session";
+    const CONFIRM_MODE_FIELD = "confirmMode";
+    // 三種確認方式；順序即設定頁下拉選單的顯示順序。
+    const CONFIRM_MODES = ["click-again", "dialog", "instant"];
+    // 預設值：主機端設定的組合層基準值，也是卡片在值缺失時的回退。
+    const DEFAULT_CONFIRM_MODE = "click-again";
+    // 設定頁卡片的外掛名稱與說明所用的字典鍵前綴（見 STRINGS）。
+    const CONFIRM_MODE_LABEL_KEYS = {
+      "click-again": "modeClickAgain",
+      dialog: "modeDialog",
+      instant: "modeInstant"
+    };
+    const CONFIRM_MODE_HINT_KEYS = {
+      "click-again": "modeClickAgainHint",
+      dialog: "modeDialogHint",
+      instant: "modeInstantHint"
+    };
 
     // ---------- 多語文案 ----------
     const STRINGS = {
@@ -54,7 +83,27 @@ window.__ModuleLoader__.load({
         liveSession: "无法删除正在运行任务的会话，请等待任务结束后重试",
         notFound: "会话不存在或已被删除",
         genericError: "删除失败，请稍后重试",
-        networkError: "网络请求失败，请稍后重试"
+        networkError: "网络请求失败，请稍后重试",
+        settingsCardTitle: "删除会话",
+        settingsCardDescription: "选择在会话菜单中删除会话时的确认方式。",
+        settingsFieldLabel: "删除确认方式",
+        settingsOverridden: "已自定义",
+        settingsReset: "恢复默认",
+        settingsUnsaved: "未保存",
+        settingsSave: "保存",
+        settingsSaving: "保存中…",
+        settingsDiscard: "放弃",
+        settingsSaveFailed: "保存失败，请重试",
+        settingsReadOnly: "当前部署不允许写入设置，此处仅供查看。",
+        settingsExpand: "展开",
+        settingsCollapse: "收起",
+        modeClickAgain: "再次点击删除",
+        modeClickAgainHint: "第一次点击进入警示状态，第二次点击才真正删除（默认，最安全）",
+        modeDialog: "弹出对话框删除",
+        modeDialogHint: "点击后在对话框里确认，确认后才会删除",
+        modeInstant: "直接删除（危险）",
+        modeInstantHint: "点击后立即删除，没有任何二次确认，可能误删会话",
+        settingsPendingNote: "当前版本的删除流程仍使用「再次点击删除」，所选方式将在后续版本生效。"
       },
       en: {
         menuArchiveSession: "Archive session",
@@ -65,7 +114,27 @@ window.__ModuleLoader__.load({
         liveSession: "Cannot delete a session that is running a task; please wait for it to finish",
         notFound: "The session does not exist or has already been deleted",
         genericError: "Deletion failed, please try again later",
-        networkError: "Network request failed, please try again later"
+        networkError: "Network request failed, please try again later",
+        settingsCardTitle: "Delete session",
+        settingsCardDescription: "Choose how deleting a session from its row menu is confirmed.",
+        settingsFieldLabel: "Delete confirmation",
+        settingsOverridden: "Customized",
+        settingsReset: "Reset to default",
+        settingsUnsaved: "Unsaved",
+        settingsSave: "Save",
+        settingsSaving: "Saving…",
+        settingsDiscard: "Discard",
+        settingsSaveFailed: "Save failed, please try again",
+        settingsReadOnly: "This deployment does not allow writing settings; shown read-only.",
+        settingsExpand: "Expand",
+        settingsCollapse: "Collapse",
+        modeClickAgain: "Click again to delete",
+        modeClickAgainHint: "The first click turns the item into a warning state; the second click deletes (default, safest)",
+        modeDialog: "Confirm in a dialog",
+        modeDialogHint: "A dialog appears after clicking; the session is deleted only after you confirm",
+        modeInstant: "Delete immediately (dangerous)",
+        modeInstantHint: "Deletes immediately with no second confirmation; a mis-click removes the session",
+        settingsPendingNote: "The current version still uses \"click again to delete\"; the selected mode takes effect in a later version."
       }
     };
 
@@ -763,6 +832,332 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // ---------- 設定頁卡片（設定 → 外掛 → 外掛設定） ----------
+    // 官方為站外外掛預留的設定位置：settings.plugin.item 是一個以「設定
+    // 命名空間」為鍵的 keyed slot，外掛在 host 端註冊命名空間、在瀏覽器端
+    // 註冊同鍵的卡片，外掛設定頁的分頁就會把兩者配對起來渲染。
+    // 卡片只負責顯示與記憶選擇；實際刪除流程目前仍固定使用「再次點擊刪除」。
+
+    /** 下拉選單與 label 關聯用的固定 element id。 */
+    const SETTINGS_FIELD_ID = "dsh-delete-session-confirm-mode";
+
+    /**
+     * 判斷設定卡片要使用的語系（"zh" 或 "en"）。
+     *
+     * 以核心 locale 服務寫入 <html lang> 的值為準（它跟隨使用者偏好設定），
+     * 取不到時退回瀏覽器語言。每次呼叫都重新求值，因此語言切換後重新渲染
+     * 就會得到新文案。
+     *
+     * @returns {string} 語系代碼（"zh" 或 "en"）。
+     */
+    function settingsLocale() {
+      const declared = typeof document !== "undefined" && document.documentElement
+        ? document.documentElement.getAttribute("lang")
+        : null;
+      const tag = String(declared || (typeof navigator !== "undefined" ? navigator.language : "") || "en").toLowerCase();
+      return tag.startsWith("zh") ? "zh" : "en";
+    }
+
+    /**
+     * 建立「刪除確認方式」卡片的狀態控制器。
+     *
+     * 控制器把 host 端 settings scope 的快照與尚未儲存的草稿合併成一份
+     * 穩定引用的快照物件，供 React 元件以 useSyncExternalStore 訂閱；所有
+     * 寫入都經由 scope.set / scope.unset，各自帶修訂柵欄，寫入被 host 拒絕
+     * 時保留草稿並標記失敗（與官方卡片的「草稿－儲存」模型一致）。
+     *
+     * @param {object} scope settingsScope.bind() 回傳的命名空間 scope。
+     * @returns {{getSnapshot: Function, subscribe: Function, select: Function,
+     *   save: Function, discard: Function, reset: Function, refresh: Function,
+     *   dispose: Function}} 卡片控制器。
+     */
+    function createSettingsCardController(scope) {
+      const listeners = new Set();
+      let draft;          // 草稿值；undefined 代表「跟隨 host 值」
+      let saving = false; // 是否正在寫入 host
+      let failed = false; // 最近一次寫入是否失敗
+      let snapshot = null;
+
+      // 讀取 host 端的有效值：值缺失或不在允許清單內時回退為預設值。
+      const storedMode = () => {
+        const section = scope.getSnapshot().value;
+        const mode = section !== null && typeof section === "object" ? section[CONFIRM_MODE_FIELD] : undefined;
+        return CONFIRM_MODES.indexOf(mode) >= 0 ? mode : DEFAULT_CONFIRM_MODE;
+      };
+      // 使用者層是否帶有此欄位：存在即代表使用者覆寫過（即使值等於預設值）。
+      const isOverridden = () => {
+        const user = scope.getSnapshot().user;
+        return user !== null && typeof user === "object" && user[CONFIRM_MODE_FIELD] !== undefined;
+      };
+      // 由 scope 快照與本機草稿組出元件要渲染的狀態。
+      const build = () => {
+        const state = scope.getSnapshot();
+        const stored = storedMode();
+        const current = draft === undefined ? stored : draft;
+        return {
+          status: state.status,
+          writable: state.writable,
+          stored,
+          draft: current,
+          dirty: draft !== undefined && draft !== stored,
+          overridden: isOverridden(),
+          saving,
+          failed
+        };
+      };
+      // 發布新快照（引用每次更新，讓 React 得以比對）。
+      const publish = () => {
+        snapshot = build();
+        for (const listener of Array.from(listeners)) {
+          try {
+            listener();
+          } catch {
+            // 單一訂閱者失敗不影響其他訂閱者。
+          }
+        }
+      };
+      const unsubscribeScope = scope.subscribe(publish);
+      publish();
+
+      // 共用寫入流程：標記 saving、執行操作、成功清除草稿、失敗標記錯誤。
+      const write = (operation) => {
+        if (saving) return;
+        saving = true;
+        failed = false;
+        publish();
+        Promise.resolve().then(operation).then(
+          () => {
+            saving = false;
+            draft = undefined;
+            publish();
+          },
+          () => {
+            saving = false;
+            failed = true;
+            publish();
+          }
+        );
+      };
+
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        // 暫存使用者在選單裡的選擇；真正的寫入發生在 save()。
+        select: (mode) => {
+          if (CONFIRM_MODES.indexOf(mode) < 0) return;
+          draft = mode;
+          failed = false;
+          publish();
+        },
+        save: () => {
+          const next = draft;
+          if (next === undefined) return;
+          write(() => scope.set(CONFIRM_MODE_FIELD, next));
+        },
+        // 丟棄草稿：畫面回到 host 端的目前值。
+        discard: () => {
+          draft = undefined;
+          failed = false;
+          publish();
+        },
+        // 清除使用者層的覆寫，讓欄位重新繼承組合層基準值。
+        reset: () => {
+          draft = undefined;
+          write(() => scope.unset(CONFIRM_MODE_FIELD));
+        },
+        refresh: publish,
+        dispose: () => {
+          unsubscribeScope();
+          listeners.clear();
+        }
+      };
+    }
+
+    // 下拉選單右側的展開箭頭；與核心 PluginCard 相同語彙（向下箭頭）。
+    const CHEVRON_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3.5 5.25 7 8.75l3.5-3.5" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    /**
+     * 渲染本外掛在設定頁「外掛設定」裡的卡片。
+     *
+     * 命名空間尚未就緒（status 非 "ready"）時不渲染任何內容，避免在
+     * host 尚未回應前顯示一張不能用的卡片。
+     *
+     * @param {object} props slot 注入的卡片狀態讀取器、動作與文案函式。
+     * @returns {object|null} 卡片元素，或 null（命名空間不可用時）。
+     */
+    function DeleteConfirmCard(props) {
+      const state = React.useSyncExternalStore(props.subscribeSettingsCard, props.getSettingsCard);
+      const [open, setOpen] = React.useState(false);
+      if (state.status !== "ready") return null;
+
+      const t = props.t;
+      const title = t("settingsCardTitle");
+      const locked = !state.writable || state.saving;
+      const selected = state.draft;
+
+      // 三個選項：文案與說明都取自字典，順序與 CONFIRM_MODES 相同。
+      const options = CONFIRM_MODES.map((mode) => React.createElement(
+        "option",
+        { key: mode, value: mode },
+        t(CONFIRM_MODE_LABEL_KEYS[mode])
+      ));
+
+      const header = React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "dshds-setcard-header",
+          "aria-expanded": open,
+          "aria-label": t(open ? "settingsCollapse" : "settingsExpand") + ": " + title,
+          onClick: () => setOpen(!open)
+        },
+        React.createElement(
+          "span",
+          { className: "dshds-setcard-headText" },
+          React.createElement("span", { className: "dshds-setcard-name" }, title),
+          React.createElement("span", { className: "dshds-setcard-description" }, t("settingsCardDescription"))
+        ),
+        state.dirty ? React.createElement("span", { className: "dshds-setcard-pending" }, t("settingsUnsaved")) : null,
+        React.createElement("span", {
+          className: "dshds-setcard-chevron" + (open ? " dshds-setcard-chevronOpen" : ""),
+          dangerouslySetInnerHTML: { __html: CHEVRON_SVG }
+        })
+      );
+
+      const field = React.createElement(
+        "div",
+        { className: "dshds-setfield" },
+        React.createElement(
+          "div",
+          { className: "dshds-setfield-head" },
+          React.createElement("label", { className: "dshds-setfield-label", htmlFor: SETTINGS_FIELD_ID }, t("settingsFieldLabel")),
+          state.overridden
+            ? React.createElement(
+                "span",
+                { className: "dshds-setfield-badges" },
+                React.createElement("span", { className: "dshds-setfield-tag" }, t("settingsOverridden")),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "dshds-setfield-reset",
+                    disabled: locked,
+                    onClick: props.resetSettingsCard
+                  },
+                  t("settingsReset")
+                )
+              )
+            : null
+        ),
+        React.createElement(
+          "select",
+          {
+            id: SETTINGS_FIELD_ID,
+            className: "dshds-setfield-select",
+            value: selected,
+            disabled: locked,
+            onChange: (event) => props.selectSettingsCard(event.target.value)
+          },
+          options
+        ),
+        React.createElement(
+          "p",
+          { className: "dshds-setfield-hint" },
+          t(CONFIRM_MODE_HINT_KEYS[selected]) + " " + t("settingsPendingNote")
+        )
+      );
+
+      const footer = React.createElement(
+        "div",
+        { className: "dshds-setcard-footer" },
+        state.failed ? React.createElement("p", { className: "dshds-setcard-failed", role: "status" }, t("settingsSaveFailed")) : null,
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "dshds-setcard-discard",
+            disabled: !state.dirty || state.saving,
+            onClick: props.discardSettingsCard
+          },
+          t("settingsDiscard")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "dshds-setcard-save",
+            disabled: !state.dirty || state.saving,
+            onClick: props.saveSettingsCard
+          },
+          t(state.saving ? "settingsSaving" : "settingsSave")
+        )
+      );
+
+      return React.createElement(
+        "li",
+        { className: "dshds-setcard" + (open ? " dshds-setcardOpen" : "") },
+        header,
+        open
+          ? React.createElement(
+              "div",
+              { className: "dshds-setcard-body" },
+              state.writable ? null : React.createElement("p", { className: "dshds-setcard-readOnly", role: "status" }, t("settingsReadOnly")),
+              field,
+              footer
+            )
+          : null
+      );
+    }
+
+    /**
+     * 註冊設定頁卡片：等待 slots 與 settingsScope 兩個瀏覽器服務就緒後，
+     * 把卡片註冊進 settings.plugin.item（鍵為本外掛的設定命名空間）。
+     *
+     * 以 ctx.inject 等待服務，而不是放進外掛層級的 inject：服務缺席的部署
+     * （非 web 或舊版）照常使用刪除功能，只是設定頁不會出現本卡片。
+     *
+     * @param {object} ctx 客戶端外掛上下文。
+     * @returns {void}
+     */
+    function mountSettingsCard(ctx) {
+      // 卡片以 useSyncExternalStore 訂閱狀態，需要 React 18 以上。
+      if (typeof React.useSyncExternalStore !== "function") return;
+      ctx.inject(["slots", "settingsScope"], (uiCtx) => {
+        // 設定卡片的任何註冊失敗都只影響設定頁；刪除功能必須照常運作，
+        // 因此整段包在 try/catch 內，失敗時僅在主控台留下診斷訊息。
+        try {
+          const scope = uiCtx.settingsScope.bind({ namespace: SETTINGS_NAMESPACE });
+          const controller = createSettingsCardController(scope);
+          // 卡片狀態（scope 訂閱與本機監聽器）隨外掛卸載一併釋放。
+          uiCtx.effect(() => () => controller.dispose(), "delete-session: settings card state");
+          // 語言切換時重新發布快照，讓卡片文案跟著更新。
+          uiCtx.effect(() => uiCtx.on("locale/change", () => controller.refresh()), "delete-session: settings card locale");
+          // 固定的注入面：函式引用穩定，元件可安全地以它們訂閱／觸發動作。
+          const face = {
+            getSettingsCard: () => controller.getSnapshot(),
+            subscribeSettingsCard: (listener) => controller.subscribe(listener),
+            selectSettingsCard: (mode) => controller.select(mode),
+            saveSettingsCard: () => controller.save(),
+            discardSettingsCard: () => controller.discard(),
+            resetSettingsCard: () => controller.reset(),
+            t: (key) => (STRINGS[settingsLocale()] ?? STRINGS.en)[key] ?? key
+          };
+          uiCtx.slots.inject("settings.plugin.item", () => uiCtx.slots.register({
+            name: "settings.plugin.item",
+            key: SETTINGS_NAMESPACE,
+            inject: () => face
+          }, DeleteConfirmCard));
+        } catch (error) {
+          console.warn("[delete-session] failed to register the settings card:", error);
+        }
+      });
+    }
+
     // ---------- 樣式 ----------
     const CSS_TAG_ID = "dsh-delete-session/delete-session.css";
     const STYLE_SELECTOR = "style[data-plugin-css=" + JSON.stringify(CSS_TAG_ID) + "]";
@@ -779,7 +1174,42 @@ window.__ModuleLoader__.load({
       ".dshds-actions{display:flex;justify-content:flex-end;gap:8px;}",
       ".dshds-btn{box-sizing:border-box;height:32px;padding:0 14px;border-radius:8px;font-family:inherit;font-size:13px;line-height:18px;cursor:pointer;}",
       ".dshds-btn-ok{background:transparent;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);}",
-      ".dshds-btn-ok:hover{background:var(--dsw-alias-interactive-bg-hover);}"
+      ".dshds-btn-ok:hover{background:var(--dsw-alias-interactive-bg-hover);}",
+      // 設定頁卡片（設定 → 外掛 → 外掛設定）：外觀對齊核心 PluginCard 的語彙。
+      ".dshds-setcard{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-3);border-radius:16px;list-style:none;transition:border-color .16s,background .16s;}",
+      ".dshds-setcard:hover{border-color:var(--dsw-alias-label-dimmed);}",
+      ".dshds-setcardOpen{background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-label-dimmed);}",
+      ".dshds-setcard-header{appearance:none;box-sizing:border-box;width:100%;font:inherit;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-radius:12px;align-items:center;gap:12px;padding:14px 16px;display:flex;}",
+      ".dshds-setcard-header:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;}",
+      ".dshds-setcard-headText{flex-direction:column;flex:1;gap:4px;min-width:0;display:flex;}",
+      ".dshds-setcard-name{color:var(--dsw-alias-label-primary);font-size:15px;font-weight:600;line-height:1.4;}",
+      ".dshds-setcard-description{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5;}",
+      ".dshds-setcard-pending{border:.5px solid var(--dsw-alias-border-l2);border-radius:6px;color:var(--dsw-alias-label-secondary);flex:none;padding:1px 6px;font-size:11px;line-height:1.5;}",
+      ".dshds-setcard-chevron{color:var(--dsw-alias-label-tertiary);flex:none;display:inline-flex;transition:transform .16s;}",
+      ".dshds-setcard-chevronOpen{transform:rotate(180deg);}",
+      ".dshds-setcard-body{border-top:.5px solid var(--dsw-alias-border-l2);margin:0 16px;padding-bottom:8px;}",
+      ".dshds-setcard-readOnly{color:var(--dsw-alias-label-tertiary);margin:12px 0 0;font-size:12px;line-height:1.5;}",
+      ".dshds-setcard-footer{border-top:.5px solid var(--dsw-alias-border-l2);justify-content:flex-end;align-items:center;gap:8px;padding:12px 0 4px;display:flex;}",
+      ".dshds-setcard-failed{min-width:0;color:var(--dsw-alias-label-error);flex:1;margin:0;font-size:12px;line-height:1.5;}",
+      ".dshds-setcard-discard,.dshds-setcard-save{appearance:none;box-sizing:border-box;font:inherit;cursor:pointer;border:1px solid transparent;border-radius:8px;padding:5px 14px;font-size:13px;line-height:1.5;}",
+      ".dshds-setcard-discard{border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);background:0 0;}",
+      ".dshds-setcard-discard:hover:not(:disabled){color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-dimmed);}",
+      ".dshds-setcard-save{background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-base);}",
+      ".dshds-setcard-save:hover:not(:disabled){filter:brightness(1.08);}",
+      ".dshds-setcard-save:disabled,.dshds-setcard-discard:disabled{opacity:.5;cursor:default;}",
+      ".dshds-setfield{flex-direction:column;gap:6px;padding:12px 0;display:flex;}",
+      ".dshds-setfield-head{align-items:center;gap:8px;display:flex;}",
+      ".dshds-setfield-label{min-width:0;color:var(--dsw-alias-label-primary);flex:1;font-size:13px;font-weight:500;line-height:1.5;}",
+      ".dshds-setfield-badges{align-items:center;gap:8px;display:inline-flex;}",
+      ".dshds-setfield-tag{border:.5px solid var(--dsw-alias-border-l2);border-radius:6px;color:var(--dsw-alias-label-secondary);padding:1px 6px;font-size:11px;line-height:1.5;}",
+      ".dshds-setfield-reset{font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;padding:0;font-size:12px;line-height:1.5;}",
+      ".dshds-setfield-reset:hover:not(:disabled){color:var(--dsw-alias-label-primary);}",
+      ".dshds-setfield-reset:disabled{cursor:default;opacity:.5;}",
+      ".dshds-setfield-select{border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-3);height:34px;font:inherit;color:var(--dsw-alias-label-primary);border-radius:8px;padding:0 12px;font-size:13px;line-height:1.5;}",
+      ".dshds-setfield-select:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none;}",
+      ".dshds-setfield-select:disabled{color:var(--dsw-alias-label-tertiary);cursor:default;}",
+      ".dshds-setfield-select option{background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);}",
+      ".dshds-setfield-hint{color:var(--dsw-alias-label-tertiary);margin:0;font-size:12px;line-height:1.5;}"
     ].join("\n");
 
     /**
@@ -860,7 +1290,7 @@ window.__ModuleLoader__.load({
     const inject = ["sessions", "workspaces"];
 
     /**
-     * 瀏覽器端外掛入口：掛載樣式、點擊捕捉與 MutationObserver。
+     * 瀏覽器端外掛入口：掛載樣式、點擊捕捉、MutationObserver 與設定頁卡片。
      *
      * 回傳的 cleanup 會移除全部監聽器、計時器、彈窗與樣式，確保卸載乾淨。
      *
@@ -870,6 +1300,8 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       activeCtx = ctx;
       mountStyle();
+      // 設定頁卡片：等待 slots 與 settingsScope 服務就緒後自行註冊。
+      mountSettingsCard(ctx);
 
       const onClickCapture = (event) => {
         // 點擊目標可能是按鈕內部的 SVG 圖示，故向上找最近的 button。

@@ -11,6 +11,8 @@ The plugin adds a **Delete session** item to a session row's `…` menu in the l
 
 So an unwanted session can be deleted conveniently with a double-click.
 
+The plugin also adds its own card to **Settings → Plugins → Plugin configuration**, where the confirmation mode used when deleting a session can be chosen (click again / confirm in a dialog / delete immediately). The current version still deletes with "click again to delete"; the chosen mode is stored and remembered, and takes effect in a later version.
+
 It is a minimal DeepSeek Harness Web out-of-tree plugin. It neither modifies the DSH core installation nor any profile configuration; instead it appends the **Delete session** menu item via DOM injection in the browser.
 
 ## Quick install
@@ -32,6 +34,8 @@ After the restart, refresh the page and open any session row's `…` menu — **
 - The warning state is remembered per session id (in-memory, auto-disarms after 8 seconds); reopening the menu within that window still shows the warning state. A failed deletion also disarms it.
 - Deletion failures show a lightweight error notice (plain DOM, not a confirm dialog) explaining the reason (session busy / not found / network error, etc.).
 - **Running sessions are refused** (HTTP 409): only sessions whose agent status is not `idle` (i.e. running a task) are rejected, to avoid corrupting a log that is still being written. Idle sessions that were merely opened and then switched away (still resident in memory) can be deleted normally.
+- **Settings card**: a card for this plugin is registered in **Settings → Plugins → Plugin configuration**, offering the delete confirmation mode (click again / confirm in a dialog / delete immediately). The card uses a draft-then-save model and writes to the `delete-session` section of `$DSH_HOME/settings.yaml`; it shows a "Customized" badge and offers "Reset to default".
+- **Deletion behaviour is unchanged for now**: the card only displays and remembers the choice; this version still deletes with "click again to delete", and the selected mode takes effect in a later version.
 
 ## Menu diagram
 
@@ -69,6 +73,31 @@ The item turns into a red warning state "Click again to delete"
                                                                    ▼
                                                               200 OK, refresh lists
 ```
+
+## Plugin settings (delete confirmation mode)
+
+Open **Settings → Plugins → Plugin configuration** to find this plugin's card, **Delete session**. Expanding it offers the confirmation mode used when deleting a session:
+
+| Option                          | Meaning                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------- |
+| Click again to delete           | The first click enters a warning state; the second click deletes (default) |
+| Confirm in a dialog             | A confirmation dialog appears; the session is deleted after confirming     |
+| Delete immediately (dangerous)  | Deletes immediately with no second confirmation                            |
+
+Saving follows the same rules as the core plugin cards:
+
+- A selection is only a draft; it is written when you press **Save**, and **Discard** drops the draft.
+- A successful save is written to the `delete-session` section of `$DSH_HOME/settings.yaml`, so it survives a restart:
+  ```yaml
+  delete-session:
+    confirmMode: click-again   # click-again | dialog | instant
+  ```
+- When the field is overridden in the user layer the card shows a "Customized" badge, and **Reset to default** clears the override so the field re-inherits its default.
+- A failed save (for example a deployment that does not allow writes) keeps the draft and reports the failure instead of silently dropping it.
+
+How it is implemented: the Host half (`index.js`) registers the `delete-session` namespace and schema through `ctx.settings.installSection`, while the browser half reads and writes that namespace through `ctx.settingsScope.bind({ namespace: 'delete-session' })` and registers its card into the official `settings.plugin.item` slot (keyed by the namespace). A deployment without the settings service only loses the card; deletion keeps working.
+
+> This version still deletes with "click again to delete"; the saved choice will drive the actual deletion flow in a later version.
 
 ## Installation
 
@@ -143,6 +172,8 @@ dsh web
 
 After refreshing the page, open any session row's `…` menu; eligible rows show **Delete session** below **Archive session**. Click once to enter the warning state, click again to delete.
 
+The plugin's card in **Settings → Plugins → Plugin configuration** also appears after the restart (that tab only shows cards for namespaces the Host serves).
+
 ## Notes (safety & limitations)
 
 - **Running sessions refused**: `ctx.agents.get(id)?.status !== 'idle'` returns 409, and a second check runs right before deletion. Only idle sessions resident in memory are exempt.
@@ -160,12 +191,13 @@ After refreshing the page, open any session row's `…` menu; eligible rows show
 
 The DSH versions and runtime environment this plugin targets:
 
-| Item                | Version / notes                                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Targeted DSH core   | minimum `0.1.3-alpha.2` (API-level check); runtime-verified on `0.1.5-rc.1` (sub-packages `0.1.5-rc.2`)                        |
-| Plugin version      | `1.0.4`                                                                                                                        |
-| Persistence backend | `@deepseek-ai/dsh-session-persistence-jsonl` (must provide `resolveCurrentLog` or `locate`)                                    |
-| Client inject deps  | `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-api-workspace-controller`, `@deepseek-ai/dsh-client-ui-workspace` |
+| Item                | Version / notes                                                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Targeted DSH core   | minimum `0.1.3-alpha.2` (API-level check); runtime-verified on `0.1.5-rc.1` (sub-packages `0.1.5-rc.2`)                                                               |
+| Plugin version      | `1.1.0`                                                                                                                                                               |
+| Settings service    | `@deepseek-ai/dsh-settings` (optional: without it the settings card is simply absent)                                                                                 |
+| Persistence backend | `@deepseek-ai/dsh-session-persistence-jsonl` (must provide `resolveCurrentLog` or `locate`)                                                                           |
+| Client inject deps  | `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-api-workspace-controller`, `@deepseek-ai/dsh-client-ui-settings`, `@deepseek-ai/dsh-client-ui-workspace` |
 
 Breaking core changes adopted in `1.0.4`:
 
@@ -179,6 +211,7 @@ Breaking core changes adopted in `1.0.4`:
 
 | Plugin version | Usable core versions | Basis                                                                                                                                                                   |
 | -------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1.1.0`        | `>= 0.1.3-alpha.2`   | Same as `1.0.4`, plus the `delete-session` settings namespace (the delete-confirmation card in Settings)                                                                |
 | `1.0.4`        | `>= 0.1.3-alpha.2`   | `sessionPersistence.list()` returns `SessionPersistenceSnapshot` from that version on (id in `header.id`), and `resolveCurrentLog()` is available from the same version |
 | `1.0.3`        | `<= 0.1.2-rc.1`      | In that range `list()` returns `SessionHeader[]` (id at the top level) and `locate()` / `supportsRawArtifacts` are still public base-class API                          |
 
@@ -186,7 +219,7 @@ The two ranges do not overlap: `0.1.3-alpha.2` changed the `list()` return type 
 
 ## Uninstall
 
-Remove `@kagurazakayashi/dsh-delete-session` from the profile's `dsh.profile.bundles` (and `dependencies`) and restart. The plugin produces no persistent state, so no other cleanup is needed.
+Remove `@kagurazakayashi/dsh-delete-session` from the profile's `dsh.profile.bundles` (and `dependencies`) and restart. The plugin's only durable trace is the optional `delete-session:` section in `$DSH_HOME/settings.yaml` (written only after a confirmation mode is saved); delete that section too if you want it gone.
 
 ## License
 

@@ -16,9 +16,15 @@
 //     的非同步 resolveCurrentLog(id)，但它只對「檔名已帶當前格式版本標記」
 //     的日誌回報路徑（本機實測 89 個既有會話中僅 4 個如此），因此另以
 //     後端執行期仍提供的 locate(header) 作為舊格式會話的回退。
+//
+// 使用者設定：本外掛向 settings 服務註冊命名空間 "delete-session"（欄位
+// confirmMode），持久化到 $DSH_HOME/settings.yaml。設定頁「外掛 → 外掛設定」
+// 的卡片即以此命名空間為鍵（卡片由 client.js 註冊）；主機端只負責註冊與
+// 保存，不讀取該值，刪除確認完全在瀏覽器端執行。
 
 import { rm } from "node:fs/promises";
 import { basename, dirname } from "node:path";
+import Schema from "@deepseek-ai/schemastery";
 
 // 穩定的 Cordis 外掛名稱與所需的 host 服務。
 export const name = "delete-session";
@@ -26,6 +32,38 @@ export const inject = ["sessions", "sessionPersistence", "workspaceRegistry", "a
 
 const ROUTE = "/delete-session/delete";
 const MAX_BODY_BYTES = 16 * 1024;
+
+// ---------- 使用者設定（刪除確認方式） ----------
+
+/** 本外掛的使用者設定命名空間（設定頁卡片即以此為鍵）。 */
+export const SETTINGS_NAMESPACE = "delete-session";
+/** 設定中承載「刪除確認方式」的欄位名稱。 */
+export const CONFIRM_MODE_FIELD = "confirmMode";
+/**
+ * 支援的刪除確認方式：
+ *   - click-again：第一次點擊進入警示狀態，第二次點擊才刪除（預設）。
+ *   - dialog：點擊後彈出確認對話框，按下確認才刪除。
+ *   - instant：點擊後立即刪除（危險，沒有任何二次確認）。
+ */
+export const CONFIRM_MODES = ["click-again", "dialog", "instant"];
+/** 預設刪除確認方式（與外掛既有行為一致）。 */
+export const DEFAULT_CONFIRM_MODE = "click-again";
+/**
+ * 設定命名空間的 schema：設定頁表單的欄位與值驗證都由它決定。
+ * 使用 union 列舉可選值，讓序列化後的 schema 能直接驅動瀏覽器端表單。
+ */
+export const SETTINGS_SCHEMA = Schema.object({
+  [CONFIRM_MODE_FIELD]: Schema.union([...CONFIRM_MODES]).default(DEFAULT_CONFIRM_MODE)
+});
+/** 組合層的設定基準值（settings 服務缺席時即為權威值）。 */
+const SETTINGS_ENTRY = { [CONFIRM_MODE_FIELD]: DEFAULT_CONFIRM_MODE };
+/**
+ * 目前權威的設定來源。settings 服務存在時由 installSection 換成其 scope
+ * 讀取器；服務卸載後回退為組合層基準值。主機端目前不使用此值，保留它是
+ * 為了讓 installSection 的 setSource 契約完整（未來若主機端需要依設定
+ * 改變行為，可直接讀 currentSettings()）。
+ */
+let settingsSource = () => SETTINGS_ENTRY;
 
 /**
  * 回傳一份 JSON 回應，並設定內容型別與內容長度標頭。
@@ -249,7 +287,22 @@ async function handleDelete(ctx, req, res) {
 }
 
 /**
- * Cordis 外掛入口：向 webServer 註冊精確匹配的刪除路由。
+ * 讀取目前權威的使用者設定（settings 服務存在時為其解析值，否則為組合層
+ * 基準值）。
+ *
+ * 主機端目前不使用這個值：刪除確認方式完全由瀏覽器端在觸發刪除時決定。
+ * 保留此讀取點是為了讓設定來源有單一權威出口，未來若主機端需要依設定
+ * 改變行為（例如拒絕 instant 模式），可直接呼叫本函式。
+ *
+ * @returns {{confirmMode: string}} 目前的設定值（深凍結快照）。
+ */
+export function currentSettings() {
+  return settingsSource();
+}
+
+/**
+ * Cordis 外掛入口：向 webServer 註冊精確匹配的刪除路由，並在 settings
+ * 服務存在時註冊本外掛的使用者設定命名空間。
  *
  * @param {object} ctx Cordis 外掛執行期上下文（提供 webServer 服務）。
  * @returns {void}
@@ -262,4 +315,27 @@ export function apply(ctx) {
     path: ROUTE,
     handler
   }), "delete-session: delete route");
+
+  // 使用者設定：把本外掛的命名空間接到 settings 服務上。
+  //
+  // 以 ctx.inject（而非外掛層級的 inject）等待服務：未掛載 settings provider
+  // 的部署照常使用刪除功能，只是設定頁不會出現本卡片。installSection 會把
+  // 組合層基準值註冊為 base 層，使用者選擇則落在 user 層並持久化；服務卸載
+  // 後自動回退為基準值。
+  ctx.inject(["settings"], (settingsCtx) => {
+    try {
+      settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, SETTINGS_ENTRY, {
+        // 接收目前權威的設定來源（服務在線時為 scope 讀取器，離線時為基準值）。
+        setSource: (current) => {
+          settingsSource = current;
+        },
+        // 設定變更後不需重算任何主機端狀態：刪除流程每次都由瀏覽器端即時決定。
+        onChange: () => {}
+      });
+    } catch (error) {
+      // 設定註冊失敗（例如命名空間已被其他外掛佔用）只影響設定卡片；
+      // 刪除路由必須照常運作，因此記錄後繼續，不讓例外往上冒。
+      console.warn("[delete-session] failed to register the settings namespace:", error);
+    }
+  });
 }
