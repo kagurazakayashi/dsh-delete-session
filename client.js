@@ -31,18 +31,20 @@ window.__ModuleLoader__.load({
     //      延時」直接同步注入（不建立計時器）；設為正數才啟用延時。
     //   6. 以 displayTitle + 相對時間（與核心相同的分桶演算法）做雙
     //      條件匹配；命中數量「恰為 1」才注入，否則不注入。
-    //   7. 點擊「刪除會話」：第一次點擊就地切換為警示狀態（紅底、警告
-    //      圖標與「再次點擊刪除」文案），不關閉選單也不彈窗；第二次點擊
-    //      才真正呼叫 host 端刪除路由。警示狀態按會話 id 記憶
-    //      （ARM_HOLD_MS 視窗），期間選單關閉重開仍會以警示狀態注入。
-    //      刪除失敗時以純 DOM 錯誤彈窗提示；成功後刷新 sessions 與
-    //      workspaces 清單。
+    //   7. 點擊「刪除會話」依使用者設定決定確認方式（見第 8 點）：
+    //      click-again（預設）第一次點擊就地切換為警示狀態（紅底、警告
+    //      圖標與「再次點擊刪除」文案），不關閉選單也不彈窗，第二次點擊
+    //      才真正刪除，警示狀態按會話 id 記憶（ARM_HOLD_MS 視窗），期間
+    //      選單關閉重開仍會以警示狀態注入；dialog 關閉選單後彈出確認
+    //      對話框，按下確認才刪除；instant 立即刪除、沒有任何確認。
+    //      三種方式最終都匯入同一條刪除路徑；刪除失敗時以純 DOM 錯誤
+    //      彈窗提示，成功後刷新 sessions 與 workspaces 清單。
     //   8. 使用者設定：在設定頁「外掛 → 外掛設定」註冊一張本外掛的卡片
     //      （settings.plugin.item，鍵為設定命名空間 "delete-session"），
     //      讓使用者選擇刪除確認方式（再次點擊／彈出對話框／直接刪除）。
     //      卡片以 settingsScope 讀寫 host 端已註冊的命名空間，值持久化到
-    //      $DSH_HOME/settings.yaml。目前版本的刪除流程仍固定使用
-    //      「再次點擊刪除」，卡片只負責顯示與記憶選擇。
+    //      $DSH_HOME/settings.yaml；已保存的值立即決定第 7 點的確認方式
+    //      （卡片上的草稿則要按下「保存」才生效）。
     // =====================================================================
 
     const DELETE_ITEM_ATTR = "data-dsh-delete-session-item";
@@ -103,7 +105,10 @@ window.__ModuleLoader__.load({
         modeDialogHint: "点击后在对话框里确认，确认后才会删除",
         modeInstant: "直接删除（危险）",
         modeInstantHint: "点击后立即删除，没有任何二次确认，可能误删会话",
-        settingsPendingNote: "当前版本的删除流程仍使用「再次点击删除」，所选方式将在后续版本生效。"
+        dialogTitle: "删除会话",
+        dialogMessage: "确定要永久删除会话「{name}」吗？此操作无法撤销。",
+        dialogConfirm: "删除",
+        dialogCancel: "取消"
       },
       en: {
         menuArchiveSession: "Archive session",
@@ -134,7 +139,10 @@ window.__ModuleLoader__.load({
         modeDialogHint: "A dialog appears after clicking; the session is deleted only after you confirm",
         modeInstant: "Delete immediately (dangerous)",
         modeInstantHint: "Deletes immediately with no second confirmation; a mis-click removes the session",
-        settingsPendingNote: "The current version still uses \"click again to delete\"; the selected mode takes effect in a later version."
+        dialogTitle: "Delete session",
+        dialogMessage: "Permanently delete the session \"{name}\"? This cannot be undone.",
+        dialogConfirm: "Delete",
+        dialogCancel: "Cancel"
       }
     };
 
@@ -350,9 +358,33 @@ window.__ModuleLoader__.load({
     // 警示圖標：與核心原語 IconWarningOutline16 相同的路徑（警示三角 + 驚嘆號）。
     const WARNING_SVG = '<svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M6.3002 3.32843L7.69986 3.32843L7.69986 7.79657H6.3002L6.3002 3.32843Z" fill="currentColor"/><path d="M6.3002 9.01935H7.69986V10.6711H6.3002V9.01935Z" fill="currentColor"/><path d="M12.6328 6.99976C12.6328 3.88874 10.111 1.36694 7 1.36694C3.88899 1.36695 1.3672 3.88875 1.36719 6.99976C1.36719 10.1108 3.88899 12.6326 7 12.6326C10.111 12.6326 12.6328 10.1108 12.6328 6.99976ZM13.8582 6.99976C13.8582 10.7873 10.7876 13.8579 7 13.8579C3.21244 13.8579 0.141846 10.7873 0.141846 6.99976C0.141857 3.2122 3.21245 0.141612 7 0.141602C10.7876 0.141602 13.8581 3.21219 13.8582 6.99976Z" fill="currentColor"/></svg>';
 
+    // ---------- 目前生效的刪除確認方式 ----------
+    // 預設值與 host 端 schema 的預設一致；設定卡片就緒後改由 settings scope
+    // 接管（scope 快照會隨 host 提交即時更新），服務缺席時維持預設值。
+    let confirmModeSource = () => DEFAULT_CONFIRM_MODE;
+
+    /**
+     * 讀取目前生效的刪除確認方式。
+     *
+     * 值不在允許清單內（設定尚未載入、host 回傳非預期值、來源拋錯）時一律
+     * 回退為預設值，確保刪除流程永遠有一條明確且安全的確認路徑。
+     *
+     * @returns {string} "click-again"、"dialog" 或 "instant"。
+     */
+    function currentConfirmMode() {
+      let mode;
+      try {
+        mode = confirmModeSource();
+      } catch {
+        return DEFAULT_CONFIRM_MODE;
+      }
+      return CONFIRM_MODES.indexOf(mode) >= 0 ? mode : DEFAULT_CONFIRM_MODE;
+    }
+
     // ---------- 兩段式確認狀態 ----------
     // 以 sessionId 記憶「已點擊一次」的警示狀態；ARM_HOLD_MS 視窗內選單
-    // 關閉重開仍會以警示樣式注入，第二次點擊即直接刪除。狀態僅存於記憶體。
+    // 關閉重開仍會以警示樣式注入，第二次點擊即直接刪除。狀態僅存於記憶體，
+    // 且只在「再次點擊刪除」模式下有意義。
     const ARM_HOLD_MS = 8000;
     const armedSessions = new Map(); // sessionId → 解除警示的計時器 id
 
@@ -451,19 +483,42 @@ window.__ModuleLoader__.load({
       const labelSpan = button.lastElementChild;
       if (labelSpan) labelSpan.textContent = STRINGS[locale].menuDeleteSession;
       // 記憶中的警示狀態（例如選單曾關閉又重開）：直接以警示樣式注入。
-      if (isSessionArmed(session.id)) renderArmed(button, locale);
+      // 只有「再次點擊刪除」模式才會有警示狀態，切換模式後不再顯示。
+      if (currentConfirmMode() === DEFAULT_CONFIRM_MODE && isSessionArmed(session.id)) renderArmed(button, locale);
       // 防止同一個項目在刪除請求進行中重複觸發。
       let busy = false;
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        // 依使用者設定（設定頁卡片）決定確認方式；三種方式都只有一條
+        // 真正刪除的路徑，因此不會有繞過確認的意外分支。
+        const mode = currentConfirmMode();
+        if (mode === "instant") {
+          // 直接刪除：不進入警示狀態，沒有任何二次確認。
+          if (busy) return;
+          busy = true;
+          closeOpenMenu(anchor);
+          deleteSession(session, locale);
+          return;
+        }
+        if (mode === "dialog") {
+          // 彈出對話框：先關閉選單再確認；取消、Escape 或點擊遮罩都不刪除。
+          if (busy) return;
+          closeOpenMenu(anchor);
+          showConfirmModal(session, locale, () => {
+            if (busy) return;
+            busy = true;
+            deleteSession(session, locale);
+          });
+          return;
+        }
+        // 再次點擊刪除（預設）：第一次點擊進入警示狀態，不關閉選單、
+        // 不彈窗；第二次點擊才真正刪除。
         if (!isSessionArmed(session.id)) {
-          // 第一次點擊：就地進入警示狀態，不關閉選單、不彈窗。
           armSession(session.id);
           renderArmed(button, locale);
           return;
         }
-        // 第二次點擊：直接刪除（無確認彈窗）。
         if (busy) return;
         busy = true;
         closeOpenMenu(anchor);
@@ -474,7 +529,8 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 刪除流程 ----------
-    // 第二次點擊後直接呼叫刪除路由；成功路徑沒有任何彈窗。
+    // 三種確認方式（再次點擊／彈出對話框／直接刪除）最終都匯入這裡；
+    // 成功路徑沒有任何彈窗。
 
     // 關閉選單：優先點擊錨點按鈕觸發 React 的 toggle；失敗則派發
     // pointerdown 讓 Menu 的 outside-close 邏輯接管。
@@ -503,8 +559,9 @@ window.__ModuleLoader__.load({
       }
     }
 
-    // ---------- 錯誤彈窗（純 DOM，不使用 React） ----------
-    // 僅在刪除失敗時顯示，用來提示失敗原因；不含確認按鈕。
+    // ---------- 對話框（純 DOM，不使用 React） ----------
+    // 兩種用途共用同一套骨架：刪除失敗的錯誤提示，以及「彈出對話框刪除」
+    // 模式的確認對話框。同一時間只會有一個對話框存在。
     let modalRoot = null;
     let modalState = null;
 
@@ -537,18 +594,21 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 顯示純 DOM 建構的錯誤彈窗（不依賴 React）。
+     * 顯示一個純 DOM 對話框（不依賴 React）。
      *
-     * 僅用於刪除失敗時提示原因，不含任何確認按鈕，支援 Escape 鍵與
-     * 點擊遮罩關閉。
+     * 共用骨架為遮罩 + 卡片 + 標題 + 說明 + 按鈕列，支援 Escape 鍵與點擊
+     * 遮罩關閉；呼叫端只提供文案與按鈕行為。同一時間只保留一個對話框，
+     * 因此每次開啟都先關閉上一個。
      *
-     * @param {string} message 錯誤描述文字。
-     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @param {object} spec 對話框內容。
+     * @param {string} spec.title 標題文字。
+     * @param {string} spec.message 說明文字。
+     * @param {Array<{label: string, className: string, onClick: Function}>} spec.buttons
+     *   按鈕定義，依序渲染；第一個按鈕取得初始焦點（呼叫端把安全選項排在最前）。
      * @returns {void}
      */
-    function showErrorModal(message, locale) {
+    function presentModal(spec) {
       closeModal();
-      const strings = STRINGS[locale];
       const root = ensureModalRoot();
 
       const overlay = document.createElement("div");
@@ -561,21 +621,25 @@ window.__ModuleLoader__.load({
 
       const titleEl = document.createElement("div");
       titleEl.className = "dshds-title";
-      titleEl.textContent = strings.errorTitle;
+      titleEl.textContent = spec.title;
 
       const descEl = document.createElement("p");
       descEl.className = "dshds-desc";
-      descEl.textContent = message;
+      descEl.textContent = spec.message;
 
       const actions = document.createElement("div");
       actions.className = "dshds-actions";
 
-      const okButton = document.createElement("button");
-      okButton.type = "button";
-      okButton.className = "dshds-btn dshds-btn-ok";
-      okButton.textContent = strings.ok;
+      const buttonEls = spec.buttons.map((definition) => {
+        const element = document.createElement("button");
+        element.type = "button";
+        element.className = definition.className;
+        element.textContent = definition.label;
+        element.addEventListener("click", () => definition.onClick());
+        actions.appendChild(element);
+        return element;
+      });
 
-      actions.appendChild(okButton);
       card.appendChild(titleEl);
       card.appendChild(descEl);
       card.appendChild(actions);
@@ -599,13 +663,73 @@ window.__ModuleLoader__.load({
         if (event.target === overlay) closeModal();
       };
 
-      okButton.addEventListener("click", () => closeModal());
       document.addEventListener("keydown", onKeyDown, true);
       overlay.addEventListener("click", onOverlayClick);
 
       modalState = { dispose };
-      // 開啟後將焦點交給「確定」，方便鍵盤操作。
-      okButton.focus();
+      if (buttonEls.length > 0) buttonEls[0].focus();
+    }
+
+    /**
+     * 顯示純 DOM 建構的錯誤彈窗（不依賴 React）。
+     *
+     * 僅用於刪除失敗時提示原因，不含任何確認按鈕，支援 Escape 鍵與
+     * 點擊遮罩關閉。
+     *
+     * @param {string} message 錯誤描述文字。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @returns {void}
+     */
+    function showErrorModal(message, locale) {
+      const strings = STRINGS[locale];
+      presentModal({
+        title: strings.errorTitle,
+        message,
+        buttons: [{
+          label: strings.ok,
+          className: "dshds-btn dshds-btn-ok",
+          onClick: () => closeModal()
+        }]
+      });
+    }
+
+    /**
+     * 顯示刪除確認對話框（「彈出對話框刪除」模式）。
+     *
+     * 只有按下確認鈕才會執行 onConfirm；取消、Escape 或點擊遮罩都只是關閉
+     * 對話框。為降低誤刪風險，初始焦點放在「取消」上，且確認鈕為唯一的
+     * 危險色按鈕。
+     *
+     * @param {object} session 目標會話摘要（含 displayTitle 或 id）。
+     * @param {string} locale 語系代碼（"zh" 或 "en"）。
+     * @param {Function} onConfirm 使用者確認後要執行的動作。
+     * @returns {void}
+     */
+    function showConfirmModal(session, locale, onConfirm) {
+      const strings = STRINGS[locale];
+      const title = typeof session.displayTitle === "string" && session.displayTitle.length > 0
+        ? session.displayTitle
+        : session.id;
+      presentModal({
+        title: strings.dialogTitle,
+        // 以函式形式代入，避免會話標題中的 $ 等字元被當成替換樣式。
+        message: strings.dialogMessage.replace("{name}", () => title),
+        buttons: [
+          {
+            label: strings.dialogCancel,
+            className: "dshds-btn dshds-btn-ok",
+            onClick: () => closeModal()
+          },
+          {
+            label: strings.dialogConfirm,
+            className: "dshds-btn dshds-btn-danger",
+            onClick: () => {
+              closeModal();
+              onConfirm();
+            }
+          }
+        ]
+      });
     }
 
     /**
@@ -941,6 +1065,8 @@ window.__ModuleLoader__.load({
 
       return {
         getSnapshot: () => snapshot,
+        // 目前 host 端的已保存值（不含草稿）：刪除流程以此為準。
+        currentMode: storedMode,
         subscribe: (listener) => {
           listeners.add(listener);
           return () => {
@@ -1068,7 +1194,7 @@ window.__ModuleLoader__.load({
         React.createElement(
           "p",
           { className: "dshds-setfield-hint" },
-          t(CONFIRM_MODE_HINT_KEYS[selected]) + " " + t("settingsPendingNote")
+          t(CONFIRM_MODE_HINT_KEYS[selected])
         )
       );
 
@@ -1133,8 +1259,16 @@ window.__ModuleLoader__.load({
         try {
           const scope = uiCtx.settingsScope.bind({ namespace: SETTINGS_NAMESPACE });
           const controller = createSettingsCardController(scope);
+          // 刪除流程改讀 host 端的已保存值（卡片上的草稿不影響行為）。
+          const boundSource = () => controller.currentMode();
+          confirmModeSource = boundSource;
           // 卡片狀態（scope 訂閱與本機監聽器）隨外掛卸載一併釋放。
-          uiCtx.effect(() => () => controller.dispose(), "delete-session: settings card state");
+          uiCtx.effect(() => () => {
+            controller.dispose();
+            // 只有仍是本實例綁定的來源時才還原預設，避免卸載舊實例時
+            // 蓋掉較新實例的綁定。
+            if (confirmModeSource === boundSource) confirmModeSource = () => DEFAULT_CONFIRM_MODE;
+          }, "delete-session: settings card state");
           // 語言切換時重新發布快照，讓卡片文案跟著更新。
           uiCtx.effect(() => uiCtx.on("locale/change", () => controller.refresh()), "delete-session: settings card locale");
           // 固定的注入面：函式引用穩定，元件可安全地以它們訂閱／觸發動作。
@@ -1175,6 +1309,8 @@ window.__ModuleLoader__.load({
       ".dshds-btn{box-sizing:border-box;height:32px;padding:0 14px;border-radius:8px;font-family:inherit;font-size:13px;line-height:18px;cursor:pointer;}",
       ".dshds-btn-ok{background:transparent;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);}",
       ".dshds-btn-ok:hover{background:var(--dsw-alias-interactive-bg-hover);}",
+      ".dshds-btn-danger{background:var(--dsw-alias-state-error-primary);border:1px solid var(--dsw-alias-state-error-primary);color:#fff;}",
+      ".dshds-btn-danger:hover{filter:brightness(1.08);}",
       // 設定頁卡片（設定 → 外掛 → 外掛設定）：外觀對齊核心 PluginCard 的語彙。
       ".dshds-setcard{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-3);border-radius:16px;list-style:none;transition:border-color .16s,background .16s;}",
       ".dshds-setcard:hover{border-color:var(--dsw-alias-label-dimmed);}",
