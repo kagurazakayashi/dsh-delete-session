@@ -1,7 +1,7 @@
 {
   "name": "@kagurazakayashi/dsh-delete-session",
-  "version": "1.1.0",
-  "description": "A minimal DeepSeek Harness Web plugin that appends a delete-session item below the archive-session item in the sidebar session row menu, resolved by an exact displayTitle + relative-time match. It also registers a Plugins-settings card for choosing how deletion is confirmed.",
+  "version": "1.2.0",
+  "description": "A minimal DeepSeek Harness Web plugin that registers a delete-session item into the official session row menu slot (sidebar.workspaces.session.menu.item) and appends it below the archive item. It also registers a Plugins-page config card for choosing how deletion is confirmed.",
   "license": "MIT",
   "author": "KagurazakaYashi(KagurazakaMiyabi)",
   "keywords": [
@@ -49,7 +49,8 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-api-session-controller",
-        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-workspace"
       ]
@@ -60,16 +61,18 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-api-session-controller": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-api-workspace-controller": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-client-ui-sidebar": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-client-ui-workspace": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-session": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-session-persistence": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-settings": ">=0.1.3-alpha.2 <0.2.0-0",
-    "@deepseek-ai/dsh-workspace": ">=0.1.3-alpha.2 <0.2.0-0"
+    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-api-workspace-controller": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-sidebar": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-session": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-session-persistence": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-workspace": ">=0.2.0-rc.1 <0.3.0-0"
   }
 }

@@ -17,10 +17,11 @@
 //     的日誌回報路徑（本機實測 89 個既有會話中僅 4 個如此），因此另以
 //     後端執行期仍提供的 locate(header) 作為舊格式會話的回退。
 //
-// 使用者設定：本外掛向 settings 服務註冊命名空間 "delete-session"（欄位
-// confirmMode），持久化到 $DSH_HOME/settings.yaml。設定頁「外掛 → 外掛設定」
-// 的卡片即以此命名空間為鍵（卡片由 client.js 註冊）；主機端只負責註冊與
-// 保存，不讀取該值，刪除確認完全在瀏覽器端執行。
+// 使用者設定：dsh 0.2.0 起設定命名空間就是 profile 入口 id（本外掛
+// cordis.patch.yml 宣告的 id：delete-session），schema 由本外掛匯出的
+// Config 宣告，值持久化在 profile 的 cordis.patch.yml。設定頁卡片由
+// client.js 以 plugins.bundle.config 註冊，並以同一命名空間讀寫 Config 的
+// volatile 欄位 confirmMode；主機端不讀取該值，刪除確認完全在瀏覽器端執行。
 
 import { rm } from "node:fs/promises";
 import { basename, dirname } from "node:path";
@@ -35,7 +36,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 // ---------- 使用者設定（刪除確認方式） ----------
 
-/** 本外掛的使用者設定命名空間（設定頁卡片即以此為鍵）。 */
+/** 本外掛的設定命名空間＝profile 入口 id（cordis.patch.yml 宣告的 id）。 */
 export const SETTINGS_NAMESPACE = "delete-session";
 /** 設定中承載「刪除確認方式」的欄位名稱。 */
 export const CONFIRM_MODE_FIELD = "confirmMode";
@@ -49,21 +50,29 @@ export const CONFIRM_MODES = ["click-again", "dialog", "instant"];
 /** 預設刪除確認方式（與外掛既有行為一致）。 */
 export const DEFAULT_CONFIRM_MODE = "click-again";
 /**
- * 設定命名空間的 schema：設定頁表單的欄位與值驗證都由它決定。
- * 使用 union 列舉可選值，讓序列化後的 schema 能直接驅動瀏覽器端表單。
+ * 本外掛的設定 schema。
+ *
+ * dsh 0.2.0 起不再有 settings.installSection / settings.register：設定
+ * 命名空間就是 profile 入口 id，schema 由外掛自己匯出的 Config 宣告，有效值
+ * 由「schema 預設 → 組合層（bundle／profile patch 的 config）→ 使用者層」
+ * 合成。
+ *
+ * 只有標記 .volatile() 的欄位會出現在設定界面且可寫。volatile 欄位在執行期
+ * 是穩定參考（讀取端以 .get() 取值）：Loader 熱更新時就地替換其值而不重掛
+ * 外掛，因此使用者存檔後刪除行為立即改變。
  */
-export const SETTINGS_SCHEMA = Schema.object({
-  [CONFIRM_MODE_FIELD]: Schema.union([...CONFIRM_MODES]).default(DEFAULT_CONFIRM_MODE)
+export const Config = Schema.object({
+  [CONFIRM_MODE_FIELD]: Schema.union([...CONFIRM_MODES]).default(DEFAULT_CONFIRM_MODE).volatile()
 });
-/** 組合層的設定基準值（settings 服務缺席時即為權威值）。 */
-const SETTINGS_ENTRY = { [CONFIRM_MODE_FIELD]: DEFAULT_CONFIRM_MODE };
 /**
- * 目前權威的設定來源。settings 服務存在時由 installSection 換成其 scope
- * 讀取器；服務卸載後回退為組合層基準值。主機端目前不使用此值，保留它是
- * 為了讓 installSection 的 setSource 契約完整（未來若主機端需要依設定
- * 改變行為，可直接讀 currentSettings()）。
+ * 目前權威的設定來源。apply() 之後指向 Config 的 volatile 參考；尚未取得
+ * Config（例如不經 Loader 直接以 ctx.plugin 掛載）時回退為預設值。
+ *
+ * 主機端目前不使用此值：刪除確認方式完全由瀏覽器端在觸發刪除時決定。保留
+ * 這個讀取點是為了讓設定來源有單一權威出口，未來若主機端需要依設定改變
+ * 行為（例如拒絕 instant 模式），可直接呼叫 currentSettings()。
  */
-let settingsSource = () => SETTINGS_ENTRY;
+let settingsSource = () => ({ [CONFIRM_MODE_FIELD]: DEFAULT_CONFIRM_MODE });
 
 /**
  * 回傳一份 JSON 回應，並設定內容型別與內容長度標頭。
@@ -287,27 +296,37 @@ async function handleDelete(ctx, req, res) {
 }
 
 /**
- * 讀取目前權威的使用者設定（settings 服務存在時為其解析值，否則為組合層
- * 基準值）。
+ * 讀取目前權威的使用者設定（來自 Config 的 volatile 參考）。
  *
  * 主機端目前不使用這個值：刪除確認方式完全由瀏覽器端在觸發刪除時決定。
- * 保留此讀取點是為了讓設定來源有單一權威出口，未來若主機端需要依設定
- * 改變行為（例如拒絕 instant 模式），可直接呼叫本函式。
  *
- * @returns {{confirmMode: string}} 目前的設定值（深凍結快照）。
+ * @returns {{confirmMode: string}} 目前的設定值。
  */
 export function currentSettings() {
   return settingsSource();
 }
 
 /**
- * Cordis 外掛入口：向 webServer 註冊精確匹配的刪除路由，並在 settings
- * 服務存在時註冊本外掛的使用者設定命名空間。
+ * Cordis 外掛入口：向 webServer 註冊精確匹配的刪除路由，並宣告本外掛自帶
+ * 設定頁（不從 schema 自動生成）。
  *
  * @param {object} ctx Cordis 外掛執行期上下文（提供 webServer 服務）。
+ * @param {object} config 由本外掛 Config 驗證後的設定；volatile 欄位為
+ *   穩定參考（以 .get() 取值）。
  * @returns {void}
  */
-export function apply(ctx) {
+export function apply(ctx, config) {
+  // 以 Config 的 volatile 參考為權威設定來源。每次讀取都取最新值，因此
+  // Loader 就地提交的熱更新立即生效。
+  const confirmModeRef = config !== null && typeof config === "object" ? config[CONFIRM_MODE_FIELD] : undefined;
+  const readConfirmMode = () => {
+    const value = confirmModeRef !== null && typeof confirmModeRef === "object" && typeof confirmModeRef.get === "function"
+      ? confirmModeRef.get()
+      : confirmModeRef;
+    return CONFIRM_MODES.includes(value) ? value : DEFAULT_CONFIRM_MODE;
+  };
+  settingsSource = () => ({ [CONFIRM_MODE_FIELD]: readConfirmMode() });
+
   // 路由處理函式：直接委派給 handleDelete，並夾帶執行期上下文。
   const handler = (req, res) => handleDelete(ctx, req, res);
   ctx.effect(() => ctx.webServer.register({
@@ -316,26 +335,19 @@ export function apply(ctx) {
     handler
   }), "delete-session: delete route");
 
-  // 使用者設定：把本外掛的命名空間接到 settings 服務上。
+  // 設定頁政策：本外掛自帶設定卡片（client.js 註冊 plugins.bundle.config），
+  // 因此宣告不從 schema 自動生成頁面。0.2.0 的這個政策只是一個描述位，
+  // 不會移除配置的讀寫能力。
   //
   // 以 ctx.inject（而非外掛層級的 inject）等待服務：未掛載 settings provider
-  // 的部署照常使用刪除功能，只是設定頁不會出現本卡片。installSection 會把
-  // 組合層基準值註冊為 base 層，使用者選擇則落在 user 層並持久化；服務卸載
-  // 後自動回退為基準值。
+  // 的部署照常使用刪除功能，只是設定頁不會出現本卡片。
   ctx.inject(["settings"], (settingsCtx) => {
     try {
-      settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, SETTINGS_ENTRY, {
-        // 接收目前權威的設定來源（服務在線時為 scope 讀取器，離線時為基準值）。
-        setSource: (current) => {
-          settingsSource = current;
-        },
-        // 設定變更後不需重算任何主機端狀態：刪除流程每次都由瀏覽器端即時決定。
-        onChange: () => {}
-      });
+      settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber), "delete-session: settings presentation");
     } catch (error) {
-      // 設定註冊失敗（例如命名空間已被其他外掛佔用）只影響設定卡片；
-      // 刪除路由必須照常運作，因此記錄後繼續，不讓例外往上冒。
-      console.warn("[delete-session] failed to register the settings namespace:", error);
+      // 政策註冊失敗（例如同一 fiber 已註冊過）只影響設定頁的自動生成提示；
+      // 刪除路由與設定讀寫必須照常運作，因此記錄後繼續，不讓例外往上冒。
+      console.warn("[delete-session] failed to register the settings presentation:", error);
     }
   });
 }

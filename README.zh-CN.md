@@ -13,9 +13,9 @@
 
 因此可以方便地通过双击删除一个不需要的会话。
 
-确认方式本身可以配置：插件在设置页「插件 → 插件配置」中注册了一张本插件的卡片，可以选择「再次点击删除」（默认）、「弹出对话框删除」或「直接删除（危险）」。保存后的选择立即生效，并持久化到 `$DSH_HOME/settings.yaml`。
+确认方式本身可以配置：插件把本插件的卡片注册进官方 `plugins.bundle.config` 槽位，渲染在侧栏「插件」页中本插件的页面上（打开 `@kagurazakayashi/dsh-delete-session` 条目，配置区位于该插件说明与各行之间），可以选择「再次点击删除」（默认）、「弹出对话框删除」或「直接删除（危险）」。保存后的选择立即生效，并持久化在 profile 的 `cordis.patch.yml` 中 `id: delete-session` 行的 `config:` 条目里（例如 `$DSH_HOME/profiles/web/cordis.patch.yml`）。
 
-它是一个极简的 DeepSeek Harness Web 树外（out-of-tree）插件。它既不修改 DSH 核心安装，也不修改任何 profile 配置，而是通过前端 DOM 在菜单中追加「删除会话」菜单项。
+它是一个极简的 DeepSeek Harness Web 树外（out-of-tree）插件。它既不修改 DSH 核心安装，也不改动任何核心文件：host 行来自它自己的 `cordis.patch.yml` bundle patch，菜单项则通过官方 `sidebar.workspaces.session.menu.item` 槽位贡献，而不是以 DOM 注入的方式追加。
 
 ## 快速安装
 
@@ -31,18 +31,18 @@ dsh web
 ## 功能特性
 
 - host 端（`index.js`）注册 `POST /delete-session/delete`。
-- 浏览器端（`client.js`）监听会话行 `…` 菜单的弹出，在「归档会话」下方注入「删除会话」项（zh / en 双语）。
-- **三种确认方式，在设置页选择**（见[插件设置](#插件设置删除确认方式)）：「再次点击删除」（默认）走就地警示状态，「弹出对话框删除」弹出确认框，「直接删除（危险）」首次点击即删除、没有任何确认。
+- 浏览器端（`client.js`）把「删除会话」项注册进官方 `sidebar.workspaces.session.menu.item` 槽位（注册 id `delete-session`，order `450`），因此紧跟在内置「归档会话」行（order `400`）之后（zh / en 双语）。
+- **三种确认方式，在插件自己的页面上选择**（见[插件设置](#插件设置删除确认方式)）：「再次点击删除」（默认）走就地警示状态，「弹出对话框删除」弹出确认框，「直接删除（危险）」首次点击即删除、没有任何确认。
 - **默认的两段式删除，无确认弹窗**：第一次点击将菜单项就地切换为警示状态（红底、警告图标、文案「再次点击删除」/「Click again to delete」），不关闭菜单也不弹窗；第二次点击才真正调用删除路由，成功后刷新会话列表。
 - 警示状态按会话 id 记忆（内存态，8 秒自动解除），期间菜单关闭再重开仍会以警示状态显示；删除失败也会解除警示。该状态只在「再次点击删除」模式下有意义。
 - 「弹出对话框删除」的确认框支持取消、Escape 与点击遮罩关闭，只有按下确认（危险色按钮）才会删除；初始焦点落在「取消」上以减少误删。
 - 删除失败时弹出轻量错误提示（纯 DOM，非确认框），说明失败原因（会话使用中 / 不存在 / 网络错误等）。
 - **正在运行任务的会话拒绝删除**（HTTP 409）：只有 agent 状态非 `idle`（正在运行任务）的会话才被拒绝，避免破坏正在写入的日志。仅被打开过、之后切换走而仍驻留内存的空闲会话可以正常删除。
-- **设置页卡片**：在设置页「插件 → 插件配置」中注册一张本插件的卡片，可选择删除确认方式（再次点击删除 / 弹出对话框删除 / 直接删除（危险））。卡片采用「草稿 — 保存」模型，保存后写入 `$DSH_HOME/settings.yaml` 的 `delete-session` 节；提供「已自定义」标记与「恢复默认」。已保存的值立即决定下一次删除的确认方式（卡片里的草稿在按下「保存」前不影响删除行为）。
+- **配置卡片**：本插件的卡片注册进官方 `plugins.bundle.config` 槽位（以 npm 包名 `@kagurazakayashi/dsh-delete-session` 为键，由 `@deepseek-ai/dsh-client-ui-plugin-manager` 提供），渲染在侧栏「插件」页中本插件的页面上，可选择删除确认方式（再次点击删除 / 弹出对话框删除 / 直接删除（危险））。卡片采用「草稿 — 保存」模型，保存后写入 profile 的 `cordis.patch.yml` 中 `id: delete-session` 行的 `config:` 条目；提供「已自定义」标记与「恢复默认」。已保存的值立即决定下一次删除的确认方式（卡片里的草稿在按下「保存」前不影响删除行为）。
 
 ## 菜单效果示意图
 
-点击会话行右侧的 `…` 后，弹出的菜单结构如下（`删除会话` 为本插件注入）。下图为点击前与点击一次后的对比——第二次点击才会真正删除：
+点击会话行右侧的 `…` 后，弹出的菜单结构如下（`删除会话` 由本插件添加）。下图为点击前与点击一次后的对比——第二次点击才会真正删除：
 
 ![删除会话演示](screenshot.png)
 
@@ -52,7 +52,7 @@ dsh web
 ├─ 重命名会话      （核心自带）
 ├─ 分叉会话        （核心自带）
 ├─ 归档会话        （核心自带）
-└─ 删除会话        ← 本插件注入（zh / en 双语）
+└─ 删除会话        ← 由本插件添加（zh / en 双语）
 ```
 
 ## 使用方式（删除确认方式）
@@ -102,7 +102,7 @@ dsh web
 
 ## 插件设置（删除确认方式）
 
-打开「设置 → 插件 → 插件配置」，可以看到本插件的卡片「删除会话」，展开后可选择删除会话时的确认方式：
+打开侧栏的「插件」页，再打开本插件的条目，即可看到「删除会话」配置区位于该插件说明与各行之间；展开后可选择删除会话时的确认方式：
 
 | 选项             | 含义                                                 |
 | ---------------- | ---------------------------------------------------- |
@@ -113,15 +113,16 @@ dsh web
 保存规则与核心的插件配置卡片一致：
 
 - 选择只是草稿，按下「保存」才会写入；「放弃」丢弃草稿。
-- 保存成功后写入 `$DSH_HOME/settings.yaml` 的 `delete-session` 节，重启后仍然保留：
+- 保存成功后写入 profile 的 `cordis.patch.yml` 中 `id: delete-session` 行的 `config`（设置命名空间就是这个 profile 入口 id），重启后仍然保留：
   ```yaml
-  delete-session:
-    confirmMode: click-again   # click-again | dialog | instant
+  - id: delete-session
+    config:
+      confirmMode: click-again   # click-again | dialog | instant
   ```
 - 字段被用户层覆写时会显示「已自定义」标记，可用「恢复默认」清除覆写、重新继承默认值。
 - 保存失败（例如部署不允许写入设置）时保留草稿并提示，不会静默丢弃。
 
-实现方式：host 端（`index.js`）用 `ctx.settings.installSection` 注册命名空间 `delete-session` 与 schema，浏览器端用 `ctx.settingsScope.bind({ namespace: 'delete-session' })` 读写该命名空间，并通过官方的 `settings.plugin.item` 槽位（键为命名空间）注册卡片。settings 服务缺席的部署只会少一张卡片，删除功能不受影响。
+实现方式：设置命名空间就是本 bundle 的 `cordis.patch.yml` 声明的 profile 入口 id `delete-session`，host 端（`index.js`）以自己的 schemastery `Config` 声明 schema（`confirmMode` 字段，标记为 `.volatile()`），已不再有 `settings.installSection` / `settings.register` / `settings.get`。浏览器端通过 `ctx.configForms.get("delete-session")`（`getSnapshot` / `subscribe` / `set` / `unset`）读写该命名空间，并把卡片注册进官方 `plugins.bundle.config` 槽位，键为 npm 包名 `@kagurazakayashi/dsh-delete-session`（由 `@deepseek-ai/dsh-client-ui-plugin-manager` 提供）。settings 服务缺席的部署只会少一张卡片，删除功能不受影响。
 
 > 保存后的值立即生效：它决定下一次点击「删除会话」时的确认方式；卡片里的草稿在按下「保存」前不影响删除行为。
 
@@ -198,7 +199,7 @@ dsh web
 
 刷新页面后，打开任意会话行 `…` 菜单，符合条件的行会在「归档会话」下方出现「删除会话」。默认（再次点击删除）下点击一次进入警示状态，再点一次即删除；换成其它确认方式后，按对应的确认流程执行。
 
-设置页「插件 → 插件配置」里的本插件卡片同样在重启后出现（该分页只显示 host 端已注册命名空间的卡片）。
+侧栏「插件」页中本插件页面上的卡片同样在重启后出现（该页面只显示 host 端正在服务的命名空间对应的条目）。
 
 ## 注意事项（安全与限制）
 
@@ -208,44 +209,56 @@ dsh web
 - **只删会话目录**：`rm(dirname(logPath), { recursive: true, force: false })`；删除前会写归档标记，但不修改工作区分组、投影缓存与共享附件。删除前还会校验目标目录名**正好等于会话 id**（后端以 `encodeSegment(id)` 命名，而会话 id 仅含 `[A-Za-z0-9._-]`），任何情况下都不会递归删除到整个 project 目录。
 - **不可恢复**：删除是递归 `rm`，没有回收站，请谨慎操作。
 - **两段式确认的内存态**（仅「再次点击删除」模式）：警示状态只存在于浏览器内存（按会话 id，8 秒窗口），插件卸载、页面刷新或超时后自动消失；不产生任何持久状态。切换到其它确认方式后不再显示该状态。
-- **同名保守策略**：标题相同且相对时间相同的行，匹配数量 ≥2，二者都不会出现删除项。
-- **DOM 注入的固有脆弱性**：本插件依赖核心 UI 的 DOM 结构（`div.sessionRow > span.title / span.time / span.rowActions > Menu 根 span > button`）与「归档会话」菜单项文案。标题优先从 `…` 按钮的 `aria-label`（`会话“{name}”的操作` / `Session actions for {name}`）解析，失败时才回退到 DOM 推导，因此核心新增的「活动定时任务」指示元素不会影响匹配。DSH 升级后若结构或文案变化，注入会静默失效（不会报错、也不会误删），需按新结构修正 `client.js`。
-- **相对时间边界漂移**：行上的相对时间由核心在渲染时计算，匹配时用当前时刻重算；若恰好处在分桶边界，可能出现 0 命中而不注入（保守、安全）。
-- **数据未就绪时不注入**：启动初期（会话/工作区清单尚未从 host 拉取完成）打开菜单不会出现删除项；数据就绪后重新打开菜单即可。若菜单保持打开期间数据到达并触发重绘，观察器会自动补注入。
+- **官方会话菜单槽位，无 DOM 注入**：本插件向 `sidebar.workspaces.session.menu.item` 列表贡献一个普通条目（注册 id `delete-session`，order `450`），由宿主菜单渲染为一个 `role="menuitem"` 按钮。槽位直接提供 `{ sessionId, displayTitle }` 与 `useMenuOpenState` 钩子，因此本插件拿到的是精确的会话 id：既不捕捉会话行 `…` 按钮的点击，也不运行 `document.body` 上的 `MutationObserver`、不解析会话行的 `aria-label`（`会话“{name}”的操作` / `Session actions for {name}`）、不重新实现核心的相对时间分桶，也不克隆「归档会话」项。键盘遍历、焦点归位与菜单关闭都由宿主菜单处理，因此不依赖任何 DOM 结构，也不依赖任何界面文案。
+- **可用性跟随槽位**：只要宿主渲染会话菜单，该项就会出现；本插件会等待该槽位被声明，因此未组合 `@deepseek-ai/dsh-client-ui-workspace` 的部署不会留下任何痕迹。
 
 ## 版本兼容性
 
 本插件适配的 DSH 版本与运行环境：
 
-| 项目            | 版本 / 说明                                                                                                                                                           |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 适配的 DSH core | 最低 `0.1.3-alpha.2`（依 API 静态核对）；运行实测于 `0.1.5-rc.1`（子包 `0.1.5-rc.2`）                                                                                 |
-| 插件版本        | `1.1.0`                                                                                                                                                               |
-| 持久化后端      | `@deepseek-ai/dsh-session-persistence-jsonl`（须提供 `resolveCurrentLog` 或 `locate`）                                                                                |
-| 设置服务        | `@deepseek-ai/dsh-settings`（可选：缺席时只是不显示设置卡片）                                                                                                         |
-| 客户端注入依赖  | `@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-api-workspace-controller`、`@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-workspace` |
+| 项目            | 版本 / 说明                                                                                                                                                                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 适配的 DSH core | 最低 `0.2.0-rc.1`（所有 `@deepseek-ai/dsh*` peer 均为 `>=0.2.0-rc.1 <0.3.0-0`）；运行实测于 `0.2.0-rc.2`                                                                                                                         |
+| 插件版本        | `1.2.0`                                                                                                                                                                                                                          |
+| 持久化后端      | `@deepseek-ai/dsh-session-persistence-jsonl`（须提供 `resolveCurrentLog` 或 `locate`）                                                                                                                                           |
+| 设置服务        | `@deepseek-ai/dsh-settings`（host 端）与 `@deepseek-ai/dsh-client-ui-settings`（`ctx.configForms`）；可选：缺席时只是不显示配置卡片                                                                                              |
+| 客户端注入依赖  | `@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-plugin-manager`、`@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-workspace`                          |
+| 贡献的槽位      | `sidebar.workspaces.session.menu.item`（注册 id `delete-session`，order `450`，由 `@deepseek-ai/dsh-client-ui-workspace` 声明）；`plugins.bundle.config`（以 npm 包名为键，由 `@deepseek-ai/dsh-client-ui-plugin-manager` 声明） |
 
 自 `1.0.4` 起适配的 core 破坏性变更：
 
-| core 变更      | 旧用法（≤ `1.0.3`）                           | 新用法（`1.0.4`）                                       |
-| -------------- | --------------------------------------------- | ------------------------------------------------------- |
-| 会话列表快照   | `list()` 项取顶层 `id`                        | `list()` 项取 `header.id`                               |
-| 定位会话日志   | `supportsRawArtifacts` 与 `locate(meta)`      | 先 `resolveCurrentLog(id)`，旧格式回退 `locate(header)` |
-| 工作区快照     | `workspaces.baselinesReady`                   | 仅 `workspaces.phase === "ready"`                       |
-| 工作区刷新     | `workspaces.refresh()`                        | 该方法已移除；只刷新 `sessions`                         |
-| 客户端注入依赖 | `@deepseek-ai/dsh-client-runtime`（已不存在） | `dsh-api-*-controller` 等现存包                         |
+| core 变更    | 旧用法（≤ `1.0.3`）                     | 新用法（`1.0.4`）                                       |
+| ------------ | ---------------------------------------- | ------------------------------------------------------- |
+| 会话列表快照 | `list()` 项取顶层 `id`                   | `list()` 项取 `header.id`                               |
+| 定位会话日志 | `supportsRawArtifacts` 与 `locate(meta)` | 先 `resolveCurrentLog(id)`，旧格式回退 `locate(header)` |
+| 工作区快照   | `workspaces.baselinesReady`              | 仅 `workspaces.phase === "ready"`                       |
+| 工作区刷新   | `workspaces.refresh()`                   | 该方法已移除；只刷新 `sessions`                         |
 
-| 插件版本 | 可用 core 版本     | 依据                                                                                                                                 |
-| -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `1.1.0`  | `>= 0.1.3-alpha.2` | 同 `1.0.4`；新增设置命名空间 `delete-session`（设置页的删除确认方式卡片），并让三种确认方式（再次点击／对话框／直接删除）真正生效    |
-| `1.0.4`  | `>= 0.1.3-alpha.2` | `sessionPersistence.list()` 自该版本起返回 `SessionPersistenceSnapshot`（id 在 `header.id`）；`resolveCurrentLog()` 亦自该版本起可用 |
-| `1.0.3`  | `<= 0.1.2-rc.1`    | 该区间 `list()` 返回 `SessionHeader[]`（id 在顶层），且 `locate()` / `supportsRawArtifacts` 仍是基类的公开 API                       |
+自 `1.2.0` 起适配的 core 破坏性变更：
 
-两个区间没有重叠：`0.1.3-alpha.2` 同时改掉了 `list()` 的返回类型并移除了基类的 `locate()` / `supportsRawArtifacts`，因此不存在能同时运行两个插件版本的 core 版本。`0.1.2-rc.1` 及更早版本无法使用 `1.0.4`。
+| core 变更             | 旧用法（≤ `1.1.0`）                                                                                              | 新用法（`1.2.0`）                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 设置命名空间与 schema | host 端用 `ctx.settings.installSection` 注册；命名空间是一个设置节                                                | 命名空间就是 profile 入口 id `delete-session`；host 端以自己的 schemastery `Config` 声明 schema（`confirmMode`，标记 `.volatile()`）             |
+| 读写设置值            | `ctx.settingsScope.bind({ namespace: 'delete-session' })`                                                         | `ctx.configForms.get("delete-session")`（`getSnapshot` / `subscribe` / `set` / `unset`）                                                         |
+| 配置卡片槽位          | `settings.plugin.item`，键为命名空间                                                                              | `plugins.bundle.config`，键为 npm 包名，由 `@deepseek-ai/dsh-client-ui-plugin-manager` 提供                                                      |
+| 会话菜单项            | DOM 注入：捕捉点击、`document.body` 上的 `MutationObserver`、解析 `aria-label`、相对时间分桶、克隆「归档会话」项  | `sidebar.workspaces.session.menu.item`，注册 id `delete-session`，order `450`；槽位提供 `{ sessionId, displayTitle }` 与 `useMenuOpenState` 钩子 |
+| 配置持久化位置        | `$DSH_HOME/settings.yaml` 的 `delete-session:` 节                                                                 | profile 的 `cordis.patch.yml` 中 `id: delete-session` 行的 `config:` 条目                                                                        |
+| 客户端注入依赖        | `dsh-api-session-controller`、`dsh-api-workspace-controller`、`dsh-client-ui-settings`、`dsh-client-ui-workspace` | 移除不再使用的 `dsh-api-workspace-controller`，新增 `dsh-client-locale` 与 `dsh-client-ui-plugin-manager`                                        |
+
+| 插件版本 | 可用 core 版本               | 依据                                                                                                                                                                                                                                       |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `1.2.0`  | `>= 0.2.0-rc.1 < 0.3.0-0`    | 让插件适配 dsh 0.2.x：设置命名空间为 profile 入口 id `delete-session`，schema 由插件自己的 schemastery `Config` 声明，卡片经 `ctx.configForms` 读写，菜单项与卡片都走官方槽位。不再支持 `0.1.x`，因为 0.1.x 的设置 API 已在 `0.2.0` 中移除 |
+| `1.1.0`  | `>= 0.1.3-alpha.2 < 0.2.0-0` | 同 `1.0.4`；新增设置命名空间 `delete-session`（删除确认方式卡片），并让三种确认方式（再次点击／对话框／直接删除）真正生效。使用 0.1.x 的设置 API，因此无法在 `0.2.0` 及更高版本运行                                                        |
+| `1.0.4`  | `>= 0.1.3-alpha.2 < 0.2.0-0` | `sessionPersistence.list()` 自该版本起返回 `SessionPersistenceSnapshot`（id 在 `header.id`）；`resolveCurrentLog()` 亦自该版本起可用                                                                                                       |
+| `1.0.3`  | `<= 0.1.2-rc.1`              | 该区间 `list()` 返回 `SessionHeader[]`（id 在顶层），且 `locate()` / `supportsRawArtifacts` 仍是基类的公开 API                                                                                                                             |
+
+各区间没有重叠：`0.1.3-alpha.2` 同时改掉了 `list()` 的返回类型并移除了基类的 `locate()` / `supportsRawArtifacts`，因此不存在能同时运行 `1.0.3` 与 `1.0.4` 的 core 版本。`0.1.2-rc.1` 及更早版本无法使用 `1.0.4`；`1.2.0` 则要求 `0.2.x`：`1.1.0` 及更早版本无法在 `0.2.0` 及更高版本运行，因为 0.1.x 的设置 API（`settings.installSection` / `settingsScope` / `settings.plugin.item` 槽位）已在 `0.2.0` 中移除。
+
+**从 `0.1.x` 迁移**：dsh `0.2.0` 只会为「导入执行时组合中已存在的 profile 入口 id」导入旧的 `$DSH_HOME/settings.yaml` 设置节，而这次导入是一次性的、且已经执行完毕。因此，仍留在 `settings.yaml.imported` 里的 `delete-session:` 节需要按[插件设置](#插件设置删除确认方式)中的 YAML 片段手工搬进 profile 的 `cordis.patch.yml`。
 
 ## 卸载
 
-从 profile 的 `dsh.profile.bundles`（以及 `dependencies`）中移除 `@kagurazakayashi/dsh-delete-session` 后重启。插件唯一的持久痕迹是 `$DSH_HOME/settings.yaml` 里的 `delete-session:` 节（只有在保存过删除确认方式后才会出现），需要一并清理时手动删除该节即可。
+从 profile 的 `dsh.profile.bundles`（以及 `dependencies`）中移除 `@kagurazakayashi/dsh-delete-session` 后重启。插件唯一的持久痕迹是 profile 的 `cordis.patch.yml` 中 `id: delete-session` 行的 `config:` 条目（只有在保存过删除确认方式后才会出现），需要一并清理时手动删除该条目即可。
 
 ## License
 
