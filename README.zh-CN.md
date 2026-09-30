@@ -102,7 +102,14 @@ dsh web
 
 ## 插件设置（删除确认方式）
 
-打开侧栏的「插件」页，再打开本插件的条目，即可看到「删除会话」配置区位于该插件说明与各行之间；展开后可选择删除会话时的确认方式：
+dsh 0.2.x 起，插件配置**不再位于「设置」对话框**（那是 0.1.x 的位置），而在插件自己的页面上。按下面四步即可找到：
+
+1. 在侧栏顶部打开「插件」页（四宫格图标，位于「工作区」之上），不是底部的「设置」。
+2. 等「已安装」列表填充出来。该页需要向 host 查询插件清单，冷启动的浏览器会话里可能要十几秒；列表未出现时页面几乎是空的，并非没有内容。
+3. 在「已安装」里点本插件的条目打开详情页——`1.2.1` 起列表显示本地化名称「删除会话」，旧版本显示包名 `@kagurazakayashi/dsh-delete-session`；点右侧开关或空白处不会进入详情页。
+4. 配置区位于该插件的**说明**与**包含的组件**之间；卡片默认收起，点卡片标题展开。
+
+展开后可选删除会话时的确认方式：
 
 | 选项             | 含义                                                 |
 | ---------------- | ---------------------------------------------------- |
@@ -125,6 +132,8 @@ dsh web
 实现方式：设置命名空间就是本 bundle 的 `cordis.patch.yml` 声明的 profile 入口 id `delete-session`，host 端（`index.js`）以自己的 schemastery `Config` 声明 schema（`confirmMode` 字段，标记为 `.volatile()`），已不再有 `settings.installSection` / `settings.register` / `settings.get`。浏览器端通过 `ctx.configForms.get("delete-session")`（`getSnapshot` / `subscribe` / `set` / `unset`）读写该命名空间，并把卡片注册进官方 `plugins.bundle.config` 槽位，键为 npm 包名 `@kagurazakayashi/dsh-delete-session`（由 `@deepseek-ai/dsh-client-ui-plugin-manager` 提供）。settings 服务缺席的部署只会少一张卡片，删除功能不受影响。
 
 > 保存后的值立即生效：它决定下一次点击「删除会话」时的确认方式；卡片里的草稿在按下「保存」前不影响删除行为。
+
+> 找不到卡片时先确认两件事：一是在「已安装」组里**点名称**进详情页（不是点开关），二是列表可能还在加载。若启用了带背景图案的皮肤，该页文字会压在画面上、对比度偏低（插件页自身没有不透明底色，卡片保留自己的底色），临时切换或停用皮肤会更容易看清。
 
 ## 安装
 
@@ -219,7 +228,7 @@ dsh web
 | 项目            | 版本 / 说明                                                                                                                                                                                                                      |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 适配的 DSH core | 最低 `0.2.0-rc.1`（所有 `@deepseek-ai/dsh*` peer 均为 `>=0.2.0-rc.1 <0.3.0-0`）；运行实测于 `0.2.0-rc.2`                                                                                                                         |
-| 插件版本        | `1.2.0`                                                                                                                                                                                                                          |
+| 插件版本        | `1.2.1`                                                                                                                                                                                                                          |
 | 持久化后端      | `@deepseek-ai/dsh-session-persistence-jsonl`（须提供 `resolveCurrentLog` 或 `locate`）                                                                                                                                           |
 | 设置服务        | `@deepseek-ai/dsh-settings`（host 端）与 `@deepseek-ai/dsh-client-ui-settings`（`ctx.configForms`）；可选：缺席时只是不显示配置卡片                                                                                              |
 | 客户端注入依赖  | `@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-plugin-manager`、`@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-workspace`                          |
@@ -247,6 +256,7 @@ dsh web
 
 | 插件版本 | 可用 core 版本               | 依据                                                                                                                                                                                                                                       |
 | -------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `1.2.1`  | `>= 0.2.0-rc.1 < 0.3.0-0`    | 新增插件展示元信息：`locale/{en,zh}.json` 提供本地化的插件名与简介，`icon.svg` 提供插件页图标；设置机制与 `1.2.0` 相同                                                                                                                     |
 | `1.2.0`  | `>= 0.2.0-rc.1 < 0.3.0-0`    | 让插件适配 dsh 0.2.x：设置命名空间为 profile 入口 id `delete-session`，schema 由插件自己的 schemastery `Config` 声明，卡片经 `ctx.configForms` 读写，菜单项与卡片都走官方槽位。不再支持 `0.1.x`，因为 0.1.x 的设置 API 已在 `0.2.0` 中移除 |
 | `1.1.0`  | `>= 0.1.3-alpha.2 < 0.2.0-0` | 同 `1.0.4`；新增设置命名空间 `delete-session`（删除确认方式卡片），并让三种确认方式（再次点击／对话框／直接删除）真正生效。使用 0.1.x 的设置 API，因此无法在 `0.2.0` 及更高版本运行                                                        |
 | `1.0.4`  | `>= 0.1.3-alpha.2 < 0.2.0-0` | `sessionPersistence.list()` 自该版本起返回 `SessionPersistenceSnapshot`（id 在 `header.id`）；`resolveCurrentLog()` 亦自该版本起可用                                                                                                       |
@@ -266,4 +276,7 @@ MIT — 见 [LICENSE](LICENSE)，版权归 KagurazakaYashi(KagurazakaMiyabi) 所
 
 ## 语言
 
-- [English](README.md)
+- [English (United States)](README.md)
+- 简体中文（中国大陆）
+- [繁體中文（台灣）](README.zh-TW.md)
+- [日本語](README.ja.md)

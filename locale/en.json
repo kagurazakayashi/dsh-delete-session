@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Delete session",
+    "description": "Delete a session from its row menu, with a configurable confirmation."
+  }
+}

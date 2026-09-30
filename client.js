@@ -124,8 +124,81 @@ window.__ModuleLoader__.load({
         dialogMessage: "Permanently delete the session \"{name}\"? This cannot be undone.",
         dialogConfirm: "Delete",
         dialogCancel: "Cancel"
+      },
+      "zh-TW": {
+        menuDeleteSession: "刪除工作階段",
+        menuDeleteConfirm: "再次點擊即可刪除",
+        errorTitle: "刪除失敗",
+        ok: "確定",
+        liveSession: "無法刪除正在執行任務的工作階段，請等待任務結束後再試一次",
+        notFound: "工作階段不存在或已被刪除",
+        genericError: "刪除失敗，請稍後再試",
+        networkError: "網路請求失敗，請稍後再試",
+        settingsCardTitle: "刪除工作階段",
+        settingsCardDescription: "選擇從工作階段選單刪除工作階段時的確認方式。",
+        settingsFieldLabel: "刪除確認方式",
+        settingsOverridden: "已覆寫",
+        settingsReset: "重設為預設值",
+        settingsUnsaved: "尚未儲存",
+        settingsSave: "儲存",
+        settingsSaving: "儲存中…",
+        settingsDiscard: "捨棄",
+        settingsSaveFailed: "儲存失敗，請再試一次",
+        settingsReadOnly: "目前部署不允許寫入設定，此處僅供檢視。",
+        settingsExpand: "展開",
+        settingsCollapse: "收合",
+        modeClickAgain: "再次點擊即可刪除",
+        modeClickAgainHint: "第一次點擊會進入警示狀態，第二次點擊才會真正刪除（預設，最安全）",
+        modeDialog: "顯示對話框後刪除",
+        modeDialogHint: "點擊後會在對話框中確認，確認後才會刪除",
+        modeInstant: "直接刪除（危險）",
+        modeInstantHint: "點擊後立即刪除，沒有任何二次確認，可能誤刪工作階段",
+        dialogTitle: "刪除工作階段",
+        dialogMessage: "確定要永久刪除工作階段「{name}」嗎？此操作無法復原。",
+        dialogConfirm: "刪除",
+        dialogCancel: "取消"
+      },
+      ja: {
+        menuDeleteSession: "セッションを削除",
+        menuDeleteConfirm: "もう一度クリックで削除",
+        errorTitle: "削除に失敗しました",
+        ok: "OK",
+        liveSession: "タスクを実行中のセッションは削除できません。タスクの終了後にもう一度お試しください",
+        notFound: "セッションが存在しないか、すでに削除されています",
+        genericError: "削除に失敗しました。しばらくしてからもう一度お試しください",
+        networkError: "ネットワーク要求に失敗しました。しばらくしてからもう一度お試しください",
+        settingsCardTitle: "セッションを削除",
+        settingsCardDescription: "セッション一覧のメニューから削除するときの確認方法を選択します。",
+        settingsFieldLabel: "削除の確認方法",
+        settingsOverridden: "カスタマイズ済み",
+        settingsReset: "既定値に戻す",
+        settingsUnsaved: "未保存",
+        settingsSave: "保存",
+        settingsSaving: "保存中…",
+        settingsDiscard: "破棄",
+        settingsSaveFailed: "保存に失敗しました。もう一度お試しください",
+        settingsReadOnly: "このデプロイでは設定を書き込めません。ここでは閲覧のみ可能です。",
+        settingsExpand: "展開",
+        settingsCollapse: "折りたたむ",
+        modeClickAgain: "もう一度クリックで削除",
+        modeClickAgainHint: "1 回目のクリックで警告状態になり、2 回目のクリックで実際に削除します（既定値、最も安全）",
+        modeDialog: "ダイアログで確認して削除",
+        modeDialogHint: "クリックするとダイアログが表示され、確認したときだけ削除します",
+        modeInstant: "すぐに削除（危険）",
+        modeInstantHint: "クリックすると確認なしで即座に削除します。誤ってセッションを削除するおそれがあります",
+        dialogTitle: "セッションを削除",
+        dialogMessage: "セッション「{name}」を完全に削除しますか？この操作は元に戻せません。",
+        dialogConfirm: "削除",
+        dialogCancel: "キャンセル"
       }
     };
+
+    // 繁體變體共用同一份台灣繁體字典：產品政策要求 zh-HK、zh-MO、zh-Hant
+    // 一律顯示台灣繁體，因此直接指向同一個物件，而不是各自複製一份文案
+    // （避免日後改字時各變體不同步）。
+    STRINGS["zh-HK"] = STRINGS["zh-TW"];
+    STRINGS["zh-MO"] = STRINGS["zh-TW"];
+    STRINGS["zh-Hant"] = STRINGS["zh-TW"];
 
     // ---------- 圖示 ----------
     /** 垃圾桶圖標：與核心原語 IconDeleteOutline 相同語彙。 */
@@ -139,14 +212,17 @@ window.__ModuleLoader__.load({
     let activeCtx = null;
 
     /**
-     * 解析目前生效的語系代碼（"zh" 或 "en"）。
+     * 解析目前生效的語系標籤（原始標籤，例如 "zh-tw"、"zh-hant"、"ja"、"en"）。
      *
      * 僅作為 fallback：對話框優先使用槽位提供的 t（與選單項同一套字典解析，
      * 因此必定與畫面語言一致）；只有在 t 缺席（例如直接呼叫內部函式）時才
      * 退回此處。以核心 locale 服務快照的 active 欄位為準（getSnapshot() 回傳
      * 的是 LocaleSnapshot 物件，不是字串），再退回 <html lang> 與瀏覽器語言。
      *
-     * @returns {string} 語系代碼（"zh" 或 "en"）。
+     * 此處刻意只回傳已轉小寫的標籤，不做簡繁二分：標籤要交給 stringsFor
+     * 逐層回退，zh-Hant／zh-HK／zh-MO 才不會被硬併成簡體 zh。
+     *
+     * @returns {string} 已轉小寫的語系標籤（例如 "zh-tw"、"zh-hant"、"ja"、"en"）。
      */
     function modalLocale() {
       let active = null;
@@ -162,7 +238,62 @@ window.__ModuleLoader__.load({
         ? document.documentElement.getAttribute("lang")
         : null;
       const tag = String(active || declared || (typeof navigator !== "undefined" ? navigator.language : "") || "en").toLowerCase();
-      return tag.startsWith("zh") ? "zh" : "en";
+      return tag;
+    }
+
+    /**
+     * 繁體變體的語系回退鏈：任一繁體變體最終都指向台灣繁體，再逐層退回。
+     */
+    const LOCALE_FALLBACKS = {
+      "zh-hk": "zh-tw",
+      "zh-mo": "zh-tw",
+      "zh-hant": "zh-tw",
+      "zh-tw": "zh"
+    };
+
+    /**
+     * 以小寫標籤索引字典。
+     *
+     * STRINGS 的鍵保留標準大小寫（"zh-TW"、"zh-Hant"），而語系標籤在比對前
+     * 一律轉小寫，因此另建這張大小寫不拘的索引表。
+     */
+    const STRINGS_BY_TAG = (() => {
+      const table = Object.create(null);
+      for (const tag of Object.keys(STRINGS)) table[tag.toLowerCase()] = STRINGS[tag];
+      return table;
+    })();
+
+    /**
+     * 依回退鏈取得字典：zh-Hant / zh-HK / zh-MO → zh-TW → zh → en；ja → en。
+     * 找不到任何一層時退回英文，確保永遠有可用文案。
+     *
+     * 逐層嘗試的順序為：完整標籤 → 逐段截短的標籤（BCP-47 前綴鏈，例如
+     * "zh-Hant-HK" 先試 "zh-hant"、"ja-JP" 先試 "ja"）→ 明確宣告的
+     * LOCALE_FALLBACKS → STRINGS.en。先走前綴鏈是為了守住產品政策：任何
+     * 帶繁體子標籤的標籤都不會在截短的過程中掉進簡體字典。
+     *
+     * @param {string} tag 語系代碼（大小寫不拘）。
+     * @returns {Object} 對應的字典物件。
+     */
+    function stringsFor(tag) {
+      const seen = new Set();
+      let current = typeof tag === "string" ? tag.trim().toLowerCase() : "";
+      while (current.length > 0 && !seen.has(current)) {
+        seen.add(current);
+        const direct = STRINGS_BY_TAG[current];
+        if (direct !== undefined) return direct;
+        // 先截掉最後一段子標籤（zh-hant-hk → zh-hant），再走宣告的回退鏈。
+        const cut = current.lastIndexOf("-");
+        const truncated = cut > 0 ? current.slice(0, cut) : "";
+        // 以 hasOwnProperty 查表：避免 "constructor" 之類的標籤命中 Object.prototype。
+        const fallback = Object.prototype.hasOwnProperty.call(LOCALE_FALLBACKS, current)
+          ? LOCALE_FALLBACKS[current]
+          : undefined;
+        if (truncated.length > 0 && !seen.has(truncated)) current = truncated;
+        else if (fallback !== undefined && !seen.has(fallback)) current = fallback;
+        else break; // seen 已擋住環路，直接結束。
+      }
+      return STRINGS.en;
     }
 
     /**
@@ -176,7 +307,7 @@ window.__ModuleLoader__.load({
      */
     function dialogText(t) {
       if (typeof t === "function") return t;
-      const strings = STRINGS[modalLocale()];
+      const strings = stringsFor(modalLocale());
       return (key) => (strings[key] !== undefined ? strings[key] : key);
     }
 
@@ -1021,10 +1152,9 @@ window.__ModuleLoader__.load({
       activeCtx = ctx;
       mountStyle();
       // 字典：槽位註冊帶 locale 時，框架會據此合成 t 注入元件。
-      ctx.effect(() => ctx.locale.register(LOCALE_NS, {
-        zh: STRINGS.zh,
-        en: STRINGS.en
-      }), "delete-session: dictionaries");
+      // 整份 STRINGS 一併註冊，繁體變體（zh-TW／zh-HK／zh-MO／zh-Hant）與
+      // ja 都是同一個物件或各自的字典，等對應語系套用後即生效。
+      ctx.effect(() => ctx.locale.register(LOCALE_NS, STRINGS), "delete-session: dictionaries");
       // 會話「…」選單項：等官方槽位被宣告後註冊。
       mountSessionMenuItem(ctx);
       // 設定頁卡片：等 configForms 服務與本外掛的設定命名空間就緒後註冊。

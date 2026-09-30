@@ -102,7 +102,14 @@ All three modes end in the same route, so the running-session refusal (409) and 
 
 ## Plugin settings (delete confirmation mode)
 
-Open the sidebar's **Plugins** page and open this plugin's entry; the **Delete session** config section sits between the plugin's description and its rows. Expanding it offers the confirmation mode used when deleting a session:
+In dsh 0.2.x the plugin's configuration is **no longer inside the Settings dialog** (that was the 0.1.x location); it lives on the plugin's own page. Four steps to reach it:
+
+1. Open the **Plugins** page at the top of the sidebar (the four-squares entry, above Workspaces) — not the **Settings** entry at the bottom.
+2. Wait for the **Installed** list to populate. The page asks the host for the plugin inventory, which can take a dozen seconds in a cold browser session; until it arrives the page looks almost empty — that does not mean the content is missing.
+3. Under **Installed**, click this plugin's entry to open its detail page — from `1.2.1` the list shows the localized name **Delete session**, while older versions show the package name `@kagurazakayashi/dsh-delete-session`; clicking the toggle on the right or the blank area does not open it.
+4. The config section sits between the plugin's **description** and its **Included components**; the card is collapsed by default, so click its title to expand it.
+
+Expanding it offers the confirmation mode used when deleting a session:
 
 | Option                         | Meaning                                                                    |
 | ------------------------------ | -------------------------------------------------------------------------- |
@@ -125,6 +132,8 @@ Saving follows the same rules as the core plugin cards:
 How it is implemented: the settings namespace is simply the profile entry id declared by this bundle's `cordis.patch.yml`, `delete-session`, and the Host half (`index.js`) declares the schema itself through its own schemastery `Config` (the `confirmMode` field, marked `.volatile()`). There is no `settings.installSection` / `settings.register` / `settings.get` any more. The browser half reads and writes that namespace through `ctx.configForms.get("delete-session")` (`getSnapshot` / `subscribe` / `set` / `unset`) and registers its card into the official `plugins.bundle.config` slot, keyed by the npm package name `@kagurazakayashi/dsh-delete-session` (provided by `@deepseek-ai/dsh-client-ui-plugin-manager`). A deployment without the settings service only loses the card; deletion keeps working.
 
 > The saved value takes effect immediately: it decides how the next "Delete session" click is confirmed. The card's unsaved draft does not affect deletion until you press Save.
+
+> Cannot find the card? Check two things first: click the plugin's **name** under **Installed** to open its detail page (not the toggle), and give the list time to load. If a skin with background artwork is active, the page's text is drawn over it and reads poorly (the Plugins page paints no opaque background of its own, while the card keeps its own); temporarily switching or disabling the skin makes it much easier to read.
 
 ## Installation
 
@@ -219,7 +228,7 @@ The DSH versions and runtime environment this plugin targets:
 | Item                | Version / notes                                                                                                                                                                                                                                              |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Targeted DSH core   | minimum `0.2.0-rc.1` (every `@deepseek-ai/dsh*` peer is `>=0.2.0-rc.1 <0.3.0-0`); runtime-verified on `0.2.0-rc.2`                                                                                                                                           |
-| Plugin version      | `1.2.0`                                                                                                                                                                                                                                                      |
+| Plugin version      | `1.2.1`                                                                                                                                                                                                                                                      |
 | Settings service    | `@deepseek-ai/dsh-settings` (Host) and `@deepseek-ai/dsh-client-ui-settings` (`ctx.configForms`); optional: without them the settings card is simply absent                                                                                                  |
 | Persistence backend | `@deepseek-ai/dsh-session-persistence-jsonl` (must provide `resolveCurrentLog` or `locate`)                                                                                                                                                                  |
 | Client inject deps  | `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-client-locale`, `@deepseek-ai/dsh-client-ui-plugin-manager`, `@deepseek-ai/dsh-client-ui-settings`, `@deepseek-ai/dsh-client-ui-workspace`                                                      |
@@ -247,6 +256,7 @@ Breaking core changes adopted in `1.2.0`:
 
 | Plugin version | Usable core versions         | Basis                                                                                                                                                                                                                                                                                                                                           |
 | -------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1.2.1`        | `>= 0.2.0-rc.1 < 0.3.0-0`    | Adds plugin display metadata: `locale/{en,zh}.json` supplies the localized plugin name and summary, and `icon.svg` supplies the Plugins-page artwork; the settings mechanism is unchanged from `1.2.0`                                                                                                                                          |
 | `1.2.0`        | `>= 0.2.0-rc.1 < 0.3.0-0`    | Adapts the plugin to dsh 0.2.x: the settings namespace is the profile entry id `delete-session` with a declarative schemastery `Config`, the card is read and written through `ctx.configForms`, and both the menu item and the card ride official slots. `0.1.x` is no longer supported, because the 0.1.x settings API was removed in `0.2.0` |
 | `1.1.0`        | `>= 0.1.3-alpha.2 < 0.2.0-0` | Same as `1.0.4`; adds the `delete-session` settings namespace (the delete-confirmation card) and makes the three confirmation modes (click again / dialog / immediate) actually drive deletion. Uses the 0.1.x settings API, so it cannot run on `0.2.0` or later                                                                               |
 | `1.0.4`        | `>= 0.1.3-alpha.2 < 0.2.0-0` | `sessionPersistence.list()` returns `SessionPersistenceSnapshot` from that version on (id in `header.id`), and `resolveCurrentLog()` is available from the same version                                                                                                                                                                         |
@@ -266,4 +276,7 @@ MIT — see [LICENSE](LICENSE), copyright KagurazakaYashi(KagurazakaMiyabi).
 
 ## Languages
 
-- [简体中文](README.zh-CN.md)
+- English (United States)
+- [简体中文（中国大陆）](README.zh-CN.md)
+- [繁體中文（台灣）](README.zh-TW.md)
+- [日本語](README.ja.md)

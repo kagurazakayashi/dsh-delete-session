@@ -1,7 +1,8 @@
 {
   "name": "@kagurazakayashi/dsh-delete-session",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "A minimal DeepSeek Harness Web plugin that registers a delete-session item into the official session row menu slot (sidebar.workspaces.session.menu.item) and appends it below the archive item. It also registers a Plugins-page config card for choosing how deletion is confirmed.",
+  "icon": "./icon.svg",
   "license": "MIT",
   "author": "KagurazakaYashi(KagurazakaMiyabi)",
   "keywords": [
@@ -30,8 +31,9 @@
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "README.md",
-    "README.zh-CN.md",
+    "icon.svg",
+    "locale/*.json",
+    "README*.md",
     "screenshot.png",
     "LICENSE"
   ],
@@ -39,6 +41,7 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "dsh": {
