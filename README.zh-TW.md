@@ -1,6 +1,8 @@
 # dsh-delete-session
 
-繁體中文 · [English](README.md)
+[简体中文](README.zh-CN.md) | 繁體中文 | [English](README.md) | [日本語](README.ja.md)
+
+![dsh-delete-session](icon.svg)
 
 **快速徹底刪除會話的 DeepSeek Harness Web 外掛。**
 
@@ -228,7 +230,7 @@ dsh web
 | 專案            | 版本 / 說明                                                                                                                                                                                                                      |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 適配的 DSH core | 最低 `0.2.0-rc.1`（所有 `@deepseek-ai/dsh*` peer 均為 `>=0.2.0-rc.1 <0.3.0-0`）；執行實測於 `0.2.0-rc.2`                                                                                                                         |
-| 外掛版本        | `1.2.1`                                                                                                                                                                                                                          |
+| 外掛版本        | `1.2.2`                                                                                                                                                                                                                          |
 | 持久化後端      | `@deepseek-ai/dsh-session-persistence-jsonl`（須提供 `resolveCurrentLog` 或 `locate`）                                                                                                                                           |
 | 設定服務        | `@deepseek-ai/dsh-settings`（host 端）與 `@deepseek-ai/dsh-client-ui-settings`（`ctx.configForms`）；可選：缺席時只是不顯示設定卡片                                                                                              |
 | 客戶端注入依賴  | `@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-plugin-manager`、`@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-workspace`                          |
@@ -256,6 +258,7 @@ dsh web
 
 | 外掛版本 | 可用 core 版本               | 依據                                                                                                                                                                                                                                       |
 | -------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `1.2.2`  | `>= 0.2.0-rc.1 < 0.3.0-0`    | 官方 `@deepseek-ai/schemastery` 改為 `peerDependencies`，新增 `screenshots.json`（市場截圖清單），README 語言列與圖示改為原生 Markdown；功能與設定機制與 `1.2.1` 相同                                                                      |
 | `1.2.1`  | `>= 0.2.0-rc.1 < 0.3.0-0`    | 新增外掛展示元資訊：`locale/{en,zh}.json` 提供本地化的外掛名與簡介，`icon.svg` 提供外掛頁圖示；設定機制與 `1.2.0` 相同                                                                                                                     |
 | `1.2.0`  | `>= 0.2.0-rc.1 < 0.3.0-0`    | 讓外掛適配 dsh 0.2.x：設定名稱空間為 profile 入口 id `delete-session`，schema 由外掛自己的 schemastery `Config` 宣告，卡片經 `ctx.configForms` 讀寫，選單項與卡片都走官方槽位。不再支援 `0.1.x`，因為 0.1.x 的設定 API 已在 `0.2.0` 中移除 |
 | `1.1.0`  | `>= 0.1.3-alpha.2 < 0.2.0-0` | 同 `1.0.4`；新增設定名稱空間 `delete-session`（刪除確認方式卡片），並讓三種確認方式（再次點選／對話方塊／直接刪除）真正生效。使用 0.1.x 的設定 API，因此無法在 `0.2.0` 及更高版本執行                                                      |
@@ -273,10 +276,3 @@ dsh web
 ## License
 
 MIT — 見 [LICENSE](LICENSE)，版權歸 KagurazakaYashi(KagurazakaMiyabi) 所有。
-
-## 語言
-
-- [English (United States)](README.md)
-- [简体中文（中国大陆）](README.zh-CN.md)
-- 繁體中文（台灣）
-- [日本語](README.ja.md)

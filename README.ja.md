@@ -1,6 +1,8 @@
 # dsh-delete-session
 
-日本語 · [English](README.md)
+[简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [English](README.md) | 日本語
+
+![dsh-delete-session](icon.svg)
 
 **セッションを素早く完全に削除するための DeepSeek Harness Web プラグインです。**
 
@@ -228,7 +230,7 @@ dsh web
 | 項目                   | バージョン / 備考                                                                                                                                                                                                                         |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 対象の DSH core        | 最低 `0.2.0-rc.1`（すべての `@deepseek-ai/dsh*` peer は `>=0.2.0-rc.1 <0.3.0-0`）。`0.2.0-rc.2` で動作確認済み                                                                                                                            |
-| プラグインのバージョン | `1.2.1`                                                                                                                                                                                                                                   |
+| プラグインのバージョン | `1.2.2`                                                                                                                                                                                                                                   |
 | 設定サービス           | `@deepseek-ai/dsh-settings`（Host）と `@deepseek-ai/dsh-client-ui-settings`（`ctx.configForms`）。任意：ない場合は設定カードが表示されないだけです                                                                                        |
 | 永続化バックエンド     | `@deepseek-ai/dsh-session-persistence-jsonl`（`resolveCurrentLog` または `locate` を提供する必要があります）                                                                                                                              |
 | クライアント注入依存   | `@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-plugin-manager`、`@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-workspace`                                   |
@@ -256,6 +258,7 @@ dsh web
 
 | プラグインのバージョン | 使用可能な core のバージョン | 根拠                                                                                                                                                                                                                                                                                                     |
 | ---------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1.2.2`                | `>= 0.2.0-rc.1 < 0.3.0-0`    | 公式パッケージ `@deepseek-ai/schemastery` を peer 依存に変更し、ストアフロント用の `screenshots.json` を追加、README の言語バーとアイコンをネイティブ Markdown に変更。動作と設定の仕組みは `1.2.1` から変更なし                                                                                         |
 | `1.2.1`                | `>= 0.2.0-rc.1 < 0.3.0-0`    | プラグイン表示メタデータを追加：`locale/{en,zh}.json` がローカライズされたプラグイン名と概要を、`icon.svg` が Plugins ページの画像を提供します。設定の仕組みは `1.2.0` と同じです                                                                                                                        |
 | `1.2.0`                | `>= 0.2.0-rc.1 < 0.3.0-0`    | プラグインを dsh 0.2.x に対応：設定名前空間は profile エントリ id `delete-session` で、宣言的な schemastery `Config` を使い、カードは `ctx.configForms` で読み書きし、メニュー項目とカードはどちらも公式スロットに乗ります。`0.1.x` はサポートしません。0.1.x の設定 API は `0.2.0` で削除されたためです |
 | `1.1.0`                | `>= 0.1.3-alpha.2 < 0.2.0-0` | `1.0.4` と同じ。`delete-session` 設定名前空間（削除確認のカード）を追加し、3 つの確認方式（もう一度クリック / ダイアログ / 即時削除）が実際に削除を制御するようにしました。0.1.x の設定 API を使うため、`0.2.0` 以降では動作しません                                                                     |
@@ -273,10 +276,3 @@ profile の `dsh.profile.bundles`（および `dependencies`）から `@kaguraza
 ## License
 
 MIT — [LICENSE](LICENSE) を参照してください。著作権は KagurazakaYashi(KagurazakaMiyabi) に帰属します。
-
-## 言語
-
-- [English (United States)](README.md)
-- [简体中文（中国大陆）](README.zh-CN.md)
-- [繁體中文（台灣）](README.zh-TW.md)
-- 日本語

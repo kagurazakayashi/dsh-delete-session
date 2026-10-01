@@ -1,6 +1,6 @@
 {
   "name": "@kagurazakayashi/dsh-delete-session",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "A minimal DeepSeek Harness Web plugin that registers a delete-session item into the official session row menu slot (sidebar.workspaces.session.menu.item) and appends it below the archive item. It also registers a Plugins-page config card for choosing how deletion is confirmed.",
   "icon": "./icon.svg",
   "license": "MIT",
@@ -35,6 +35,7 @@
     "locale/*.json",
     "README*.md",
     "screenshot.png",
+    "screenshots.json",
     "LICENSE"
   ],
   "exports": {
@@ -59,11 +60,9 @@
       ]
     }
   },
-  "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.2"
-  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
     "@deepseek-ai/dsh-agent": ">=0.2.0-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-api-session-controller": ">=0.2.0-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-api-workspace-controller": ">=0.2.0-rc.1 <0.3.0-0",
